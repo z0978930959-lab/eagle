@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;700;900&family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+html, body {
+  background-color: #0e1a12;
+}
+
+body {
+  font-family: 'Noto Sans TC', sans-serif;
+}
+
+.font-display {
+  font-family: 'Noto Serif TC', serif;
+}
+
+.font-mono-tc {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* subtle grass mow-line texture */
+.grass-stripes {
+  background-image: repeating-linear-gradient(
+    100deg,
+    rgba(255,255,255,0.025) 0px,
+    rgba(255,255,255,0.025) 40px,
+    transparent 40px,
+    transparent 80px
+  );
+}
+
+.chalk-line {
+  background-image: linear-gradient(rgba(242,234,217,0.9), rgba(242,234,217,0.9));
+  height: 2px;
+}
+
+@keyframes floodlight-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.85; }
+}
+.floodlight-glow {
+  animation: floodlight-pulse 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floodlight-glow {
+    animation: none;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(242,234,217,0.2);
+  border-radius: 4px;
+}
