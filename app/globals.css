@@ -58,3 +58,10 @@ body {
   background: rgba(242,234,217,0.2);
   border-radius: 4px;
 }
+
+/* 球影閃現動畫 */
+@keyframes ping-once {
+  0% { transform: scale(1.6); opacity: 0.4; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-ping-once { animation: ping-once 0.18s ease-out; }

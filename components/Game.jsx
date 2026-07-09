@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { TEAMS, PITCH_TYPES, SHIFTS, QUADS, ROLE_NAMES, zoneId, zoneLabel, batsLabel, throwsLabel, isCellsContiguous } from '../data/teams';
-import { PITCH_TYPE_MAP } from '../lib/engine';
+import { TEAMS, PITCH_TYPES, SHIFTS, ROLE_NAMES, zoneId, zoneLabel, batsLabel, throwsLabel } from '../data/teams';
+import { PITCH_TYPE_MAP, gradeOf, GRADE_PARAMS } from '../lib/engine';
 import { battingKey, fieldingKey, currentPitcher, staminaOf } from '../lib/gameLogic';
 
 const POLL_MS = 2000;
@@ -55,81 +55,153 @@ async function copyText(text) {
 
 /* ---------------- 小元件 ---------------- */
 
-// 好球帶 3x3 選取。支援多選（最多 maxCells 格，且需邊相連）：
-//  - selected: 可以是單一 cell id 字串，也可以是陣列（多選）
-//  - onSelect(next): next 為陣列。點擊已選格＝取消；點擊新格＝加入；破壞相連或超過上限則不加入
-function ZoneGrid({ selected, onSelect, maxCells = 3, single = false }) {
-  const selectedArr = Array.isArray(selected) ? selected : selected ? [selected] : [];
-  const selSet = new Set(selectedArr);
-  const handleClick = (key) => {
-    if (single) {
-      // 單選模式（投手選落點）：回傳「字串」而非陣列，點新格直接取代、點同格取消
-      onSelect(selected === key ? null : key);
-      return;
-    }
-    if (selSet.has(key)) {
-      // 取消：移除後仍要保持相連（單獨移除若讓其他格斷開就拒絕）
-      const next = selectedArr.filter((k) => k !== key);
-      if (isCellsContiguous(next)) onSelect(next);
-      return;
-    }
-    if (selectedArr.length >= maxCells) return; // 已滿
-    const next = [...selectedArr, key];
-    if (!isCellsContiguous(next)) return; // 會斷開就不加
-    onSelect(next);
-  };
+const GRADE_STYLE = {
+  S: 'bg-gradient-to-br from-amber-300 to-yellow-500 text-black',
+  A: 'bg-gradient-to-br from-red-400 to-rose-500 text-white',
+  B: 'bg-gradient-to-br from-sky-400 to-blue-500 text-white',
+  C: 'bg-gradient-to-br from-zinc-400 to-zinc-500 text-black',
+};
+
+function GradeBadge({ grade }) {
   return (
-    <div className="w-full max-w-[260px] mx-auto">
-      <div className="grid grid-cols-3 gap-1.5">
-        {[0, 1, 2].map((r) =>
-          [0, 1, 2].map((c) => {
-            const key = zoneId(r, c);
-            const isHeart = r === 1 && c === 1;
-            const isSel = selSet.has(key);
-            const canAdd = single || (!isSel && selectedArr.length < maxCells && isCellsContiguous([...selectedArr, key]));
-            const disabledLook = !isSel && !canAdd;
-            return (
-              <button
-                key={key}
-                onClick={() => handleClick(key)}
-                className={`aspect-square rounded-md text-[11px] font-mono-tc flex items-center justify-center border transition
-                  ${isSel ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : disabledLook ? 'bg-field-grass2/30 border-field-chalk/10 text-field-chalk/30 cursor-not-allowed' : 'bg-field-grass2/70 border-field-chalk/15 text-field-chalk/80 hover:bg-field-grass2'}
-                  ${isHeart && !isSel ? 'ring-1 ring-field-floodlight/50' : ''}
-                `}
-              >
-                {zoneLabel(r, c)}
-              </button>
-            );
-          })
-        )}
-      </div>
-      <div className="text-[10px] text-field-chalk/45 text-center mt-1.5">
-        {single ? '點選目標落點（再點一次取消）' : `已選 ${selectedArr.length}/${maxCells} 格・需邊相連（可再點取消）`}
-      </div>
-    </div>
+    <span className={`inline-flex items-center justify-center w-4.5 h-4.5 min-w-[18px] min-h-[18px] rounded text-[11px] font-black align-middle ${GRADE_STYLE[grade] || GRADE_STYLE.C}`}>
+      {grade}
+    </span>
   );
 }
 
-function PitchTypeRow({ selected, onSelect, favIds = [] }) {
+// 球種列：顯示 S/A/B/C 等級（疲勞會讓等級掉階，C 級陌生球種被打擊率提升）
+function PitchTypeRow({ selected, onSelect, pitcher }) {
   return (
     <div className="flex flex-wrap gap-2 justify-center">
-      {PITCH_TYPES.map((p) => (
-        <button
-          key={p.id}
-          onClick={() => onSelect(p.id)}
-          className={`px-3 py-1.5 rounded-full text-sm border transition
-            ${selected === p.id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25 text-field-chalk/85 hover:border-field-chalk/50'}
-          `}
-        >
-          {favIds.includes(p.id) && <span className="mr-0.5">★</span>}
-          {p.name}
-        </button>
-      ))}
+      {PITCH_TYPES.map((p) => {
+        const grade = gradeOf(pitcher, p.id);
+        return (
+          <button
+            key={p.id}
+            onClick={() => onSelect(p.id)}
+            className={`px-3 py-1.5 rounded-lg text-sm border flex items-center gap-1.5 ${
+              selected === p.id
+                ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold'
+                : 'border-field-chalk/25 text-field-chalk/85'
+            }`}
+          >
+            <GradeBadge grade={grade} />
+            <span>{p.name}</span>
+            <span className={`text-[10px] ${selected === p.id ? 'text-field-night/60' : 'text-field-chalk/40'}`}>{p.tag}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-// 投手體力血條：綠 > 黃 > 紅
+/* ---------------- 投手拖曳配球盤 ----------------
+ * 外圈＝壞球區、內部 3×3＝好球帶。把「球」拖到（或直接點）目標位置。
+ * 球體依球種顯示位移球影：直球＝乾淨一顆球；縱向系（曲/叉/變速）＝向下墜落影；滑球＝向外橫移影。
+ */
+function PitchTargetBoard({ typeId, target, onTarget }) {
+  const boardRef = useRef(null);
+  const [dragPos, setDragPos] = useState(null); // {x,y} 相對 board 的百分比
+  const pitchType = PITCH_TYPE_MAP[typeId];
+
+  // 由座標判定落點：中央 60% 區域切 3×3，外圈＝壞球區
+  const zoneFromPoint = (clientX, clientY) => {
+    const el = boardRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+    const inner = 0.2; // 好球帶內縮 20%
+    if (x < inner || x > 1 - inner || y < inner || y > 1 - inner) return 'waste';
+    const c = Math.min(2, Math.floor(((x - inner) / (1 - inner * 2)) * 3));
+    const r = Math.min(2, Math.floor(((y - inner) / (1 - inner * 2)) * 3));
+    return `${r}-${c}`;
+  };
+
+  const handlePointer = (e) => {
+    const el = boardRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setDragPos({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
+    const z = zoneFromPoint(e.clientX, e.clientY);
+    if (z) onTarget(z);
+  };
+
+  // 球體目前顯示位置：拖曳中跟手指；否則吸附到已選格中心
+  const ballPos = (() => {
+    if (dragPos) return dragPos;
+    if (!target) return null;
+    if (target === 'waste') return { x: 50, y: 91 };
+    const [r, c] = target.split('-').map(Number);
+    const inner = 20;
+    return { x: inner + ((c + 0.5) / 3) * (100 - inner * 2), y: inner + ((r + 0.5) / 3) * (100 - inner * 2) };
+  })();
+
+  const shadowStyle = pitchType.breakDir === 'low'
+    ? { transform: 'translate(-50%, 30%)' }
+    : pitchType.breakDir === 'outer'
+      ? { transform: 'translate(10%, -50%)' }
+      : null;
+
+  return (
+    <div
+      ref={boardRef}
+      onPointerDown={(e) => { e.currentTarget.setPointerCapture?.(e.pointerId); handlePointer(e); }}
+      onPointerMove={(e) => { if (e.buttons > 0) handlePointer(e); }}
+      onPointerUp={() => setDragPos(null)}
+      className="relative w-full max-w-[300px] aspect-square mx-auto rounded-xl bg-black/50 border border-field-chalk/25 overflow-hidden touch-none select-none cursor-crosshair"
+    >
+      {/* 壞球區外圈 */}
+      <div className={`absolute inset-0 ${target === 'waste' ? 'bg-red-900/35' : 'bg-red-950/20'}`} />
+      <div className="absolute top-1.5 left-1/2 -translate-x-1/2 text-[10px] text-red-300/60">壞球區（拖到外圈＝故意壞球，兼防盜壘）</div>
+      {/* 好球帶 3×3 */}
+      <div className="absolute rounded-lg overflow-hidden border-2 border-field-chalk/40" style={{ inset: '20%' }}>
+        <div className="grid grid-cols-3 grid-rows-3 w-full h-full">
+          {[0, 1, 2].map((r) =>
+            [0, 1, 2].map((c) => {
+              const key = `${r}-${c}`;
+              const isSel = target === key;
+              const isHeart = r === 1 && c === 1;
+              return (
+                <div
+                  key={key}
+                  className={`border border-field-chalk/15 flex items-center justify-center text-[9px] ${
+                    isSel ? 'bg-field-floodlight/30' : isHeart ? 'bg-field-grass2/60' : 'bg-field-grass2/40'
+                  } ${isHeart ? 'text-field-floodlight/50' : 'text-field-chalk/35'}`}
+                >
+                  {zoneLabel(r, c)}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+      {/* 球體＋球影 */}
+      {ballPos && (
+        <div className="absolute pointer-events-none" style={{ left: `${ballPos.x}%`, top: `${ballPos.y}%` }}>
+          {pitchType.breakDir && (
+            <div
+              className="absolute w-6 h-6 rounded-full bg-white/15 border border-white/20 -translate-x-1/2 -translate-y-1/2"
+              style={shadowStyle}
+            />
+          )}
+          <div className="absolute w-6 h-6 rounded-full bg-white -translate-x-1/2 -translate-y-1/2 shadow-[0_0_12px_rgba(255,255,255,0.7)]">
+            {/* 縫線 */}
+            <div className="absolute inset-0 rounded-full border-[2.5px] border-transparent border-l-red-500 border-r-red-500 rotate-12" />
+          </div>
+        </div>
+      )}
+      {!target && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <span className="text-xs text-field-chalk/50 bg-black/40 rounded-full px-3 py-1">拖曳或點擊放置球的位置</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 體力條：10 格電量式視覺，顏色隨體力由綠→黃→紅，低於 25% 閃爍警示
 function StaminaBar({ pct, width = 'w-28', pitchCount = null }) {
   const zone = pct > 60 ? 'good' : pct > 25 ? 'warn' : 'bad';
@@ -160,24 +232,6 @@ function StaminaBar({ pct, width = 'w-28', pitchCount = null }) {
       </div>
       <span className={`text-[10px] font-mono-tc font-bold ${textColor}`}>{pct}%</span>
       {pitchCount != null && <span className="text-[10px] text-field-chalk/40 font-mono-tc">{pitchCount} 球</span>}
-    </div>
-  );
-}
-
-function QuadGrid({ selected, onSelect }) {
-  return (
-    <div className="grid grid-cols-2 gap-1.5 w-full max-w-[220px] mx-auto">
-      {QUADS.map((q) => (
-        <button
-          key={q.id}
-          onClick={() => onSelect(q.id)}
-          className={`aspect-[2/1] rounded-md text-sm flex items-center justify-center border transition
-            ${selected === q.id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'bg-field-grass2/70 border-field-chalk/15 text-field-chalk/80 hover:bg-field-grass2'}
-          `}
-        >
-          {q.name}
-        </button>
-      ))}
     </div>
   );
 }
@@ -286,6 +340,130 @@ function GameLog({ log }) {
   );
 }
 
+/* ---------------- 打者即時反應揮擊 ----------------
+ * 投手球出手（隨機 0.7~1.5 秒醞釀）→ 球影閃現在「實際進壘點」→
+ * 打者要在反應窗內把球棒點到該格才算有效擊球。
+ * 變化球會先閃在假位置、約 45% 窗口後才「折」到真實位置（會轉彎！）；
+ * 壞球區的球閃在好球帶外側——出棒就是追打。
+ * 反應越快時機分數越高；窗口結束沒出棒＝目送。
+ */
+function BatSwingGame({ flash, powerMode = false, onDone }) {
+  // flash: { zone: 'r-c'|'out', breakDir: 'low'|'outer'|null, window: ms }
+  const [stage, setStage] = useState('windup'); // windup | flying | done
+  const [ballCell, setBallCell] = useState(null); // 'r-c' | 'edge'
+  const [verdict, setVerdict] = useState(null);
+  const doneRef = useRef(false);
+  const flashAtRef = useRef(0);
+  const window_ = Math.round((flash.window || 800) * (powerMode ? 0.85 : 1)); // 強力打擊窗口 -15%
+
+  // 假位置：變化球先出現在「位移前」的位置（低位系往上一格、外角系往內一格）
+  const decoyOf = (zone, breakDir) => {
+    if (!breakDir || zone === 'out') return null;
+    let [r, c] = zone.split('-').map(Number);
+    if (breakDir === 'low') r = Math.max(0, r - 1);
+    if (breakDir === 'outer') c = Math.max(0, c - 1);
+    const d = `${r}-${c}`;
+    return d === zone ? null : d;
+  };
+
+  useEffect(() => {
+    const timers = [];
+    const windup = 700 + Math.random() * 800;
+    const decoy = decoyOf(flash.zone, flash.breakDir);
+    timers.push(setTimeout(() => {
+      setStage('flying');
+      flashAtRef.current = performance.now();
+      if (decoy) {
+        setBallCell(decoy);
+        timers.push(setTimeout(() => setBallCell(flash.zone === 'out' ? 'edge' : flash.zone), window_ * 0.45)); // 中途折彎！
+      } else {
+        setBallCell(flash.zone === 'out' ? 'edge' : flash.zone);
+      }
+      // 窗口結束：沒出棒＝目送
+      timers.push(setTimeout(() => finish(null, null), window_));
+    }, windup));
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const finish = (cell, timing) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setStage('done');
+    if (cell == null) {
+      setVerdict({ label: '目送……', tone: 'text-field-chalk/70' });
+    } else {
+      const t = timing ?? 0;
+      setVerdict(
+        t >= 85 ? { label: '神反應！', tone: 'text-field-floodlight' }
+        : t >= 60 ? { label: '跟上了！', tone: 'text-emerald-300' }
+        : { label: '慢了半拍…', tone: 'text-red-300' }
+      );
+    }
+    setTimeout(() => onDone({ cell, timing }), 650);
+  };
+
+  const swingAt = (cell) => {
+    if (stage !== 'flying' || doneRef.current) return;
+    const elapsed = performance.now() - flashAtRef.current;
+    const timing = Math.max(10, Math.min(100, Math.round(100 - (elapsed / window_) * 78)));
+    finish(cell, timing);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center px-5 select-none touch-none">
+      <div className="text-field-chalk/70 text-sm mb-1">
+        {stage === 'windup' ? '投手抬腿了……盯緊球！' : stage === 'flying' ? '球來了——點擊球的位置揮棒！！' : ''}
+      </div>
+      <div className="text-[11px] text-field-chalk/40 mb-4">
+        {powerMode ? '⚡ 強力打擊：反應窗更短、打偏更傷，但咬中就是大的' : '球可能中途轉彎（變化球）——太早出手會被騙'}
+      </div>
+
+      {/* 反應九宮格：外框＝壞球邊緣 */}
+      <div className="relative w-full max-w-[320px]">
+        <div className="grid grid-cols-3 gap-1.5 p-3 rounded-xl bg-black/60 border-2 border-field-chalk/25">
+          {[0, 1, 2].map((r) =>
+            [0, 1, 2].map((c) => {
+              const key = `${r}-${c}`;
+              const hasBall = ballCell === key;
+              return (
+                <button
+                  key={key}
+                  onPointerDown={() => swingAt(key)}
+                  className={`relative aspect-square rounded-md border transition-colors ${
+                    hasBall ? 'bg-field-grass2 border-field-floodlight' : 'bg-field-grass2/40 border-field-chalk/15'
+                  }`}
+                >
+                  {hasBall && (
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <span className="w-7 h-7 rounded-full bg-white shadow-[0_0_16px_rgba(255,255,255,0.9)] animate-ping-once">
+                        <span className="block w-full h-full rounded-full border-[3px] border-transparent border-l-red-500 border-r-red-500 rotate-12" />
+                      </span>
+                    </span>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+        {/* 壞球區示意：球墜到好球帶外時亮在下緣 */}
+        <div
+          onPointerDown={() => swingAt('out')}
+          className={`mt-1.5 h-9 rounded-md border flex items-center justify-center text-[11px] cursor-pointer ${
+            ballCell === 'edge' ? 'bg-red-900/50 border-red-400/60 text-red-200' : 'bg-black/40 border-field-chalk/15 text-field-chalk/35'
+          }`}
+        >
+          {ballCell === 'edge' ? '⚠ 球墜出好球帶！（點這裡＝追打壞球）' : '壞球區（別追）'}
+        </div>
+      </div>
+
+      {verdict && (
+        <div className={`mt-5 font-display text-3xl font-bold ${verdict.tone} animate-pulse`}>{verdict.label}</div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- 揮棒時機小遊戲 ----------------
  * 打者確認出棒後彈出：光標在時機條上來回擺動（對方投手球威越高越快），
  * 在中央甜蜜點按下「揮棒」拿高分。分數 0~100 送回伺服器放大/縮小打擊結果權重。
@@ -380,9 +558,9 @@ function SwingTimingGame({ stuff = 50, actionLabel = '揮棒！', onDone }) {
 
 function InfoTip({ type }) {
   const content = {
-    pitcher: ['配球不是只拼最強球路。拿手球更穩，但越明顯越容易被鎖定。', '佈陣會被打者看見，等於你先亮一張心理戰線索。'],
-    batter: ['鎖定猜球獎勵最高，但猜反會很傷。保護打法適合對付變化球與拉打佈陣。', '方位猜法比較安全；單格猜中才是真正的大獎。', '出棒後會進入「揮棒時機」：猜球決定你讀不讀得懂對手，時機決定你的手上功夫。'],
-    result: ['結果畫面會揭曉雙方決策。看懂這一球，下一球才有反制空間。'],
+    pitcher: ['S/A 是拿手球路：更不容易失投。B/C 陌生球路容易被咬中，疲勞還會讓全部等級下修。', '拖曳白球到目標點，變化球會顯示位移球影；出手時機條太差＝失投紅中。', '壘上有人時可牽制——如果對方剛好下了盜壘暗號，大概率直接抓死。'],
+    batter: ['球影閃現的瞬間，把游標拖到那一格點下去。越快出手時機越好，點偏一格威力就掉。', '小心變化球：一開始閃的可能是假位置，會在中途折彎！', '強力打擊全壘打大增，但甜蜜區更小、打偏更傷。看球可以磨球數，壞球區的球別追。'],
+    result: ['結果畫面會揭曉雙方決策。看懂這一球，下一球才有反制空間。', '只有「毫釐之差」的刺殺 play 才能挑戰；高飛接殺挑戰必維持原判。'],
   }[type];
   if (!content) return null;
   return (
@@ -550,14 +728,16 @@ function Lobby({ onEnter, error }) {
 function PitcherScreen({ view, send, busy }) {
   const g = view.game;
   const [typeId, setTypeId] = useState('fastball');
-  const [zone, setZone] = useState(null);
+  const [target, setTarget] = useState(null);
   const [shift, setShift] = useState('normal');
   const [showBullpen, setShowBullpen] = useState(false);
+  const [releasing, setReleasing] = useState(false); // 出手時機小遊戲進行中
 
   const fKey = fieldingKey(g.half);
   const side = g[fKey];
   const pitcher = currentPitcher(side);
   const remainingArms = side.team.pitchers.length - side.staff.used.length;
+  const grade = gradeOf(pitcher, typeId);
 
   return (
     <div className="max-w-xl mx-auto px-5 py-8">
@@ -569,8 +749,7 @@ function PitcherScreen({ view, send, busy }) {
         </div>
         <div className="text-[11px] text-field-chalk/40 mt-0.5">
           {throwsLabel(pitcher.throws)} ・控球 {pitcher.effControl} ・球威 {pitcher.effStuff}
-          {pitcher.fatigue > 0 && <span className="text-red-300/80">（疲勞 -{pitcher.fatigue}）</span>}
-          ・已投 {pitcher.pitchCount} 球
+          {pitcher.fatigue > 0 && <span className="text-red-300/80">（疲勞 -{pitcher.fatigue}，球種等級掉落中）</span>}
         </div>
         <div className="mt-1">
           <StaminaBar pct={pitcher.stamina} width="w-40" pitchCount={pitcher.pitchCount} />
@@ -623,13 +802,21 @@ function PitcherScreen({ view, send, busy }) {
       )}
 
       <div className="mt-5">
-        <div className="text-sm mb-2 text-field-chalk/70 text-center">球種（★ 擅長）</div>
-        <PitchTypeRow selected={typeId} onSelect={setTypeId} favIds={pitcher.fav} />
+        <div className="text-sm mb-2 text-field-chalk/70 text-center">
+          球種等級 <GradeBadge grade="S" /><GradeBadge grade="A" /> 擅長・<GradeBadge grade="B" /><GradeBadge grade="C" /> 陌生（C 級失投率高、被打擊率 +10%）
+        </div>
+        <PitchTypeRow selected={typeId} onSelect={setTypeId} pitcher={pitcher} />
       </div>
 
       <div className="mt-5">
-        <div className="text-sm mb-2 text-field-chalk/70 text-center">目標落點</div>
-        <ZoneGrid selected={zone} onSelect={setZone} single />
+        <div className="text-sm mb-2 text-field-chalk/70 text-center">拖曳球體到目標位置</div>
+        <PitchTargetBoard typeId={typeId} target={target} onTarget={setTarget} />
+        {target && (
+          <div className="text-[11px] text-field-chalk/50 text-center mt-1.5">
+            目標：{target === 'waste' ? '故意壞球（防盜壘）' : zoneLabel(...target.split('-').map(Number))}・
+            <GradeBadge grade={grade} /> {PITCH_TYPE_MAP[typeId].name}
+          </div>
+        )}
       </div>
 
       <div className="mt-5">
@@ -652,18 +839,11 @@ function PitcherScreen({ view, send, busy }) {
 
       <div className="mt-6 flex flex-col items-center gap-2">
         <button
-          disabled={!zone || busy}
-          onClick={() => send('pitcher_submit', { typeId, zoneTarget: zone, shift })}
+          disabled={!target || busy}
+          onClick={() => setReleasing(true)}
           className="px-8 py-2.5 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30"
         >
-          投出這一球
-        </button>
-        <button
-          disabled={busy}
-          onClick={() => send('pitcher_submit', { typeId, zoneTarget: 'waste', shift })}
-          className="text-xs text-field-chalk/50 underline underline-offset-2"
-        >
-          故意投壞球引誘出棒（順帶防跑，盜壘成功率 -15%）
+          投出這一球（進入出手時機）
         </button>
         <button
           disabled={busy}
@@ -683,10 +863,21 @@ function PitcherScreen({ view, send, busy }) {
         )}
         {(g.bases.first || g.bases.second) && (
           <div className="text-[10px] text-field-chalk/40 text-center max-w-[280px]">
-            牽制會重置你的配球倒數；有機率直接抓到離壘過大的跑者、也可能暴傳讓跑者推進（越疲勞越容易失誤，最高 20%）。跑者回壘後這一球更難盜壘成功
+            牽制會重置配球倒數；若對方正好偷按了盜壘，大概率直接抓死！投手越疲勞越容易暴傳（最高 20%）
           </div>
         )}
       </div>
+
+      {releasing && (
+        <SwingTimingGame
+          stuff={pitcher.effStuff}
+          actionLabel="出手！"
+          onDone={(score) => {
+            setReleasing(false);
+            send('pitcher_submit', { typeId, zoneTarget: target, shift, release: score });
+          }}
+        />
+      )}
 
       <GameLog log={g.log} />
     </div>
@@ -695,48 +886,36 @@ function PitcherScreen({ view, send, busy }) {
 
 /* ---------------- 打者回合 ---------------- */
 
+const BATTER_MODES = [
+  { id: 'take', name: '不打擊', desc: '目視這一球，考驗選球（壞球免費、好球挨一顆）' },
+  { id: 'normal', name: '打擊', desc: '均衡出棒，反應窗正常' },
+  { id: 'power', name: '強力打擊', desc: '反應窗 -15%、打偏更傷；咬中就是長打或紅不讓' },
+  { id: 'bunt', name: '觸擊短棒', desc: '犧牲推進跑者（時機條決定觸擊品質）' },
+];
+
 function BatterScreen({ view, send, busy }) {
   const g = view.game;
-  const [mode, setMode] = useState('lock');
-  const [guessCat, setGuessCat] = useState('fastball'); // 'fastball' | 'breaking'
-  const [guessSpecies, setGuessSpecies] = useState(null); // 變化球種類（null＝不指定）
-  const [zoneKind, setZoneKind] = useState('cell'); // 'cell' 好球帶多選（1~3 格相連） | 'quad' 預設方位
-  const [guessCells, setGuessCells] = useState([]); // cell 模式：1~3 個相連格
-  const [guessQuad, setGuessQuad] = useState(null); // quad 模式：單一方位
-  const [steal, setSteal] = useState(null);
-  const [showBench, setShowBench] = useState(false);
-  const [timingPayload, setTimingPayload] = useState(null); // 非 null＝時機小遊戲進行中，暫存待送 payload
+  const [mode, setMode] = useState('normal');
+  const [reacting, setReacting] = useState(false); // 即時反應小遊戲進行中
+  const [buntTiming, setBuntTiming] = useState(false);
 
   const bKey = battingKey(g.half);
   const fKey = fieldingKey(g.half);
   const side = g[bKey];
-  const fieldingSide = g[fKey];
+  const oppSide = g[fKey];
+  const oppPitcher = currentPitcher(oppSide);
   const batter = side.lineup[side.lineupIdx % side.lineup.length];
-  const oppPitcher = currentPitcher(fieldingSide);
   const shift = g.pendingPitch?.shift || 'normal';
-
-  const runnersOn = !!(g.bases.first || g.bases.second || g.bases.third);
-  const canBunt = runnersOn && g.outs < 2;
-  const canHitRun = !!g.bases.first;
-  const canStealFirst = !!g.bases.first && !g.bases.second;
-  const canStealSecond = !!g.bases.second && !g.bases.third;
+  const flash = g.pendingPitch?.flash;
   const availableBench = side.bench.filter((b) => !b.used);
+  const [showBench, setShowBench] = useState(false);
 
-  const modes = [
-    ['lock', '鎖定猜球', true],
-    ['protect', '保護打法', true],
-    ['take', '看球', true],
-    ['bunt', '觸擊短打', canBunt],
-    ['hitrun', '打帶跑', canHitRun],
-  ];
-
-  const zoneReady = zoneKind === 'quad' ? !!guessQuad : guessCells.length >= 1;
-  const canConfirm = mode !== 'lock' || zoneReady;
+  const submit = (payload) => send('batter_submit', { mode, ...payload });
 
   return (
     <div className="max-w-xl mx-auto px-5 py-8">
       <div className="text-center mb-4">
-        <div className="text-xs text-field-chalk/50">你是進攻方・對方已投出，換你反應</div>
+        <div className="text-xs text-field-chalk/50">你是進攻方・對方已出手，準備反應</div>
         <div className="font-display text-xl font-bold" style={{ color: side.team.color }}>
           {side.team.name}｜第 {(side.lineupIdx % side.lineup.length) + 1} 棒 {batter.name}
           <ForeignTag show={batter.foreign} />
@@ -761,6 +940,9 @@ function BatterScreen({ view, send, busy }) {
           <StaminaBar pct={oppPitcher.stamina} width="w-32" pitchCount={oppPitcher.pitchCount} />
         </div>
         <div>對方佈陣：<span className="text-field-chalk/80">{SHIFTS.find((sh) => sh.id === shift)?.name}</span></div>
+        {g.pendingSteal && (
+          <div className="text-field-floodlight font-bold animate-pulse">🏃 跑者已啟動盜壘（{g.pendingSteal.base === 'double' ? '雙盜壘！' : g.pendingSteal.base === 'first' ? '一壘→二壘' : '二壘→三壘'}）</div>
+        )}
       </div>
 
       <div className="mt-3 flex justify-center">
@@ -796,163 +978,58 @@ function BatterScreen({ view, send, busy }) {
 
       <div className="mt-5">
         <div className="text-sm mb-2 text-field-chalk/70 text-center">打擊策略</div>
-        <div className="flex gap-2 justify-center flex-wrap">
-          {modes.map(([id, label, enabled]) => (
+        <div className="grid grid-cols-2 gap-2 max-w-sm mx-auto">
+          {BATTER_MODES.map((m) => (
             <button
-              key={id}
-              disabled={!enabled}
-              onClick={() => setMode(id)}
-              className={`px-3 py-1.5 rounded-full text-sm border disabled:opacity-25 ${mode === id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
+              key={m.id}
+              onClick={() => setMode(m.id)}
+              className={`rounded-lg border px-3 py-2 text-left ${
+                mode === m.id ? 'bg-field-floodlight text-field-night border-field-floodlight' : 'border-field-chalk/25'
+              }`}
             >
-              {label}
+              <div className={`text-sm font-bold ${mode === m.id ? '' : 'text-field-chalk/90'}`}>{m.name}</div>
+              <div className={`text-[10px] leading-snug mt-0.5 ${mode === m.id ? 'text-field-night/70' : 'text-field-chalk/45'}`}>{m.desc}</div>
             </button>
           ))}
         </div>
-        <div className="text-[11px] text-field-chalk/40 text-center mt-1.5 min-h-[16px]">
-          {mode === 'lock' && '猜直球/變化球（可加碼指定種類）＋猜單格或方位；猜得越細，獎勵越高'}
-          {mode === 'protect' && '把球碰進場內求上壘，三振率低但長打少；剋拉打佈陣'}
-          {mode === 'take' && '完全不揮棒'}
-          {mode === 'bunt' && '犧牲觸擊推進跑者，兩好球後觸成界外＝三振'}
-          {mode === 'hitrun' && '一壘跑者提前起跑＋打者必須揮棒；破壞雙殺，但揮空跑者幾乎必死'}
-        </div>
       </div>
 
-      {mode === 'lock' && (
-        <>
-          <div className="mt-5">
-            <div className="text-sm mb-2 text-field-chalk/70 text-center">猜球路</div>
-            <div className="flex gap-2 justify-center">
-              {[['fastball', '直球'], ['breaking', '變化球']].map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => {
-                    setGuessCat(id);
-                    if (id === 'fastball') setGuessSpecies(null);
-                  }}
-                  className={`px-4 py-1.5 rounded-full text-sm border ${guessCat === id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
-                >
-                  {id === 'fastball' && oppPitcher.fav.includes('fastball') && <span className="mr-0.5">★</span>}
-                  {label}
-                </button>
-              ))}
-            </div>
-            {guessCat === 'breaking' && (
-              <div className="mt-2">
-                <div className="text-[11px] text-field-chalk/45 text-center mb-1.5">加碼指定種類（猜中獎勵更高，猜錯種類仍算猜中變化球）</div>
-                <div className="flex flex-wrap gap-2 justify-center">
-                  <button
-                    onClick={() => setGuessSpecies(null)}
-                    className={`px-3 py-1.5 rounded-full text-sm border ${guessSpecies === null ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
-                  >
-                    不指定
-                  </button>
-                  {PITCH_TYPES.filter((p) => p.id !== 'fastball').map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => setGuessSpecies(p.id)}
-                      className={`px-3 py-1.5 rounded-full text-sm border ${guessSpecies === p.id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
-                    >
-                      {oppPitcher.fav.includes(p.id) && <span className="mr-0.5">★</span>}
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="mt-5">
-            <div className="text-sm mb-2 text-field-chalk/70 text-center">猜位置</div>
-            <div className="flex gap-2 justify-center mb-2">
-              {[['cell', '好球帶格（1 格精準／2-3 格範圍）'], ['quad', '預設方位（4 選 1）']].map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => setZoneKind(id)}
-                  className={`px-3 py-1.5 rounded-full text-xs border ${zoneKind === id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {zoneKind === 'cell' ? (
-              <ZoneGrid selected={guessCells} onSelect={setGuessCells} maxCells={3} />
-            ) : (
-              <QuadGrid selected={guessQuad} onSelect={setGuessQuad} />
-            )}
-          </div>
-        </>
-      )}
-
-      {mode !== 'hitrun' && (canStealFirst || canStealSecond) && (
-        <div className="mt-5">
-          <div className="text-sm mb-2 text-field-chalk/70 text-center">跑者盜壘（球沒被打進場內時發動）</div>
-          {(g.heldClose ?? 0) > 0 && (
-            <div className="text-[11px] text-red-300/90 text-center mb-2 animate-pulse">
-              ⚠️ 跑者剛被牽制回壘 ×{g.heldClose}——這一球盜壘成功率下降 {g.heldClose * 12}%
-            </div>
-          )}
-          <div className="flex gap-2 justify-center flex-wrap">
-            <button
-              onClick={() => setSteal(null)}
-              className={`px-3 py-1.5 rounded-full text-sm border ${steal === null ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
-            >
-              不盜壘
-            </button>
-            {canStealFirst && (
-              <button
-                onClick={() => setSteal('first')}
-                className={`px-3 py-1.5 rounded-full text-sm border ${steal === 'first' ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
-              >
-                一壘跑者盜二壘（速 {g.baseSpeeds.first}）
-              </button>
-            )}
-            {canStealSecond && (
-              <button
-                onClick={() => setSteal('second')}
-                className={`px-3 py-1.5 rounded-full text-sm border ${steal === 'second' ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
-              >
-                二壘跑者盜三壘（速 {g.baseSpeeds.second}）
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="mt-6 flex justify-center">
+      <div className="mt-6 flex flex-col items-center gap-1.5">
         <button
-          disabled={!canConfirm || busy}
+          disabled={busy}
           onClick={() => {
-            const payload = {
-              mode,
-              guessCat: mode === 'lock' ? guessCat : null,
-              guessSpecies: mode === 'lock' && guessCat === 'breaking' ? guessSpecies : null,
-              guessZoneKind: mode === 'lock' ? zoneKind : 'cell',
-              guessZone: mode === 'lock' ? (zoneKind === 'quad' ? guessQuad : guessCells) : null,
-              steal: mode === 'hitrun' ? null : steal,
-            };
-            if (mode === 'take') {
-              send('batter_submit', payload); // 不揮棒＝沒有時機可言
-            } else {
-              setTimingPayload(payload); // 進入揮棒時機小遊戲
-            }
+            if (mode === 'take') submit({ swungCell: null, timing: null });
+            else if (mode === 'bunt') setBuntTiming(true);
+            else setReacting(true);
           }}
           className="px-8 py-2.5 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30"
         >
-          {mode === 'take' ? '不揮棒' : mode === 'bunt' ? '擺短棒' : '出棒'}
+          {mode === 'take' ? '目送這一球' : mode === 'bunt' ? '擺短棒（進入時機）' : '站上打擊區（進入反應）'}
         </button>
         {mode !== 'take' && (
-          <div className="ml-3 self-center text-[10px] text-field-chalk/40 max-w-[130px]">
-            按下後進入揮棒時機——抓準甜蜜點才有好結果
+          <div className="text-[10px] text-field-chalk/40 text-center max-w-[260px]">
+            {mode === 'bunt' ? '時機條停在甜蜜點＝完美觸擊' : '球影閃現在哪、就點哪一格——變化球會中途轉彎，別被騙！'}
           </div>
         )}
       </div>
 
-      {timingPayload && (
+      {reacting && flash && (
+        <BatSwingGame
+          flash={flash}
+          powerMode={mode === 'power'}
+          onDone={({ cell, timing }) => {
+            setReacting(false);
+            submit({ swungCell: cell, timing });
+          }}
+        />
+      )}
+      {buntTiming && (
         <SwingTimingGame
           stuff={oppPitcher.effStuff}
-          actionLabel={mode === 'bunt' ? '出棒點放！' : '揮棒！'}
+          actionLabel="出棒點放！"
           onDone={(score) => {
-            setTimingPayload(null);
-            send('batter_submit', { ...timingPayload, timing: score });
+            setBuntTiming(false);
+            submit({ swungCell: g.pendingPitch?.flash?.zone !== 'out' ? '1-1' : 'out', timing: score });
           }}
         />
       )}
@@ -964,35 +1041,99 @@ function BatterScreen({ view, send, busy }) {
 
 /* ---------------- 結果 / 等待 / 結束 ---------------- */
 
-function batterGuessText(c) {
-  if (!c || c.mode !== 'lock') return '';
-  let t = c.guessCat === 'fastball' ? '直球' : '變化球';
-  if (c.guessSpecies) t += `（${PITCH_TYPE_MAP[c.guessSpecies]?.name}）`;
-  let z = '';
-  if (c.guessZone != null) {
-    if (c.guessZoneKind === 'quad') {
-      z = `方位・${QUADS.find((q) => q.id === c.guessZone)?.name || ''}`;
-    } else {
-      // cell 模式：兼容單一字串與陣列
-      const cells = Array.isArray(c.guessZone) ? c.guessZone : [c.guessZone];
-      const labels = cells.map((k) => zoneLabel(...k.split('-').map(Number)));
-      z = cells.length === 1 ? labels[0] : `${cells.length} 格・${labels.join('／')}`;
-    }
+const STEAL_LABEL = {
+  first: { name: '一壘跑者盜二壘', desc: '直球有風險、變化球揮空大加成' },
+  second: { name: '二壘跑者盜三壘', desc: '距離較短，被抓機率略高' },
+  double: { name: '雙盜壘（一二壘齊跑）', desc: '成功二三壘有人；失敗前位跑者出局' },
+};
+
+// 進攻方在對方配球階段的等待畫面：可以「偷偷」宣告盜壘（守備方看不到）
+function OffenseWaitScreen({ view, send, busy }) {
+  const g = view.game;
+  const options = g.stealOptions || [];
+  const pending = g.pendingSteal;
+  return (
+    <div className="max-w-xl mx-auto px-5 py-8">
+      <Scoreboard g={g} />
+      <Countdown deadline={g.deadline} serverNow={g.serverNow} />
+      <WaitingCard title="對方投手正在配球…" sub="現在是下暗號的時機（對方超時會被自動處理）" />
+
+      {options.length > 0 && (
+        <div className="mt-4 rounded-xl bg-black/30 border border-field-chalk/12 p-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-bold text-field-chalk/85">🏃 盜壘暗號（對方看不到）</div>
+            {pending && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-field-floodlight/20 text-field-floodlight border border-field-floodlight/40 animate-pulse">
+                已下達・{STEAL_LABEL[pending.base]?.name}
+              </span>
+            )}
+          </div>
+          <div className="mt-2 text-[11px] text-field-chalk/50 leading-relaxed">
+            投球出手後跑者立刻啟動。⚠️ 若對方選擇牽制，已啟動的跑者大概率被抓死；界外球不算、安打可多推進一個壘包。
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            {options.map((b) => {
+              const on = pending?.base === b;
+              return (
+                <button
+                  key={b}
+                  disabled={busy}
+                  onClick={() => send('declare_steal', { base: on ? null : b })}
+                  className={`rounded-lg px-3 py-2.5 text-left border transition ${on
+                    ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold'
+                    : 'bg-field-grass2/60 border-field-chalk/15 text-field-chalk/85 hover:bg-field-grass2'}`}
+                >
+                  <div className="text-sm">{on ? '✅ ' : ''}{STEAL_LABEL[b]?.name}</div>
+                  <div className={`text-[10px] mt-0.5 ${on ? 'text-field-night/70' : 'text-field-chalk/45'}`}>
+                    {on ? '再點一次取消暗號' : STEAL_LABEL[b]?.desc}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <GameLog log={g.log} />
+    </div>
+  );
+}
+
+function batterModeText(c) {
+  if (!c) return '—';
+  const names = {
+    take: '看球（不出棒）',
+    normal: '正常打擊',
+    power: '強力打擊',
+    bunt: '觸擊短打',
+    ibb: '敬遠',
+    pickoff: '—（牽制事件）',
+  };
+  let t = names[c.mode] || '—';
+  if ((c.mode === 'normal' || c.mode === 'power') && c.swungCell) {
+    if (c.swungCell === 'out') t += '・追打壞球區';
+    else if (c.swungCell === 'none') t += '・沒跟上（未出棒）';
+    else t += `・鎖定 ${zoneLabel(...c.swungCell.split('-').map(Number))}`;
   }
-  return `${t}・${z}`;
+  return t;
 }
 
 function pitchChoiceText(choice) {
   if (!choice) return '—';
   if (choice.zoneTarget === 'ibb') return '敬遠';
   if (choice.zoneTarget === 'pickoff') return '牽制';
-  const type = PITCH_TYPE_MAP[choice.typeId]?.name || choice.typeId || '—';
-  const zone = choice.zoneTarget === 'waste'
-    ? '故意壞球'
+  const t = PITCH_TYPE_MAP[choice.typeId];
+  const type = t?.name || choice.typeId || '—';
+  const gradeTxt = choice.grade ? `【${choice.grade}】` : '';
+  const zone = choice.zoneTarget === 'waste' || choice.zoneTarget === 'out'
+    ? '壞球區'
     : choice.zoneTarget
       ? zoneLabel(...choice.zoneTarget.split('-').map(Number))
       : '—';
-  return `${type}・${zone}`;
+  const rel = choice.release != null
+    ? choice.release < 22 ? '・出手失手！' : choice.release >= 80 ? '・出手完美' : ''
+    : '';
+  return `${gradeTxt}${type}・${zone}${rel}`;
 }
 
 function shiftText(g, r) {
@@ -1002,18 +1143,9 @@ function shiftText(g, r) {
 
 function DecisionReplay({ g, result }) {
   const actual = `${result.pitchTypeName}${result.hung ? '（失投）' : ''}・${result.zoneLabel}`;
-  const batter = result.batterChoice?.mode === 'lock'
-    ? batterGuessText(result.batterChoice)
-    : {
-        protect: '保護打法',
-        take: '看球',
-        bunt: '觸擊短打',
-        hitrun: '打帶跑',
-        ibb: '敬遠',
-        pickoff: '—（牽制事件）',
-      }[result.batterChoice?.mode] || '—';
+  const batter = batterModeText(result.batterChoice);
   const steal = result.batterChoice?.steal
-    ? result.batterChoice.steal === 'first' ? '一壘跑者啟動' : '二壘跑者啟動'
+    ? { first: '一壘跑者啟動', second: '二壘跑者啟動', double: '雙盜壘發動！' }[result.batterChoice.steal] || '跑者啟動'
     : '無';
 
   return (
@@ -1206,9 +1338,6 @@ function ResultScreen({ view, send, busy }) {
                 {r.challenge.text}
               </div>
             )}
-            {r.batterChoice?.mode === 'lock' && (
-              <div className="mt-3 text-xs text-field-chalk/45">打者鎖定：{batterGuessText(r.batterChoice)}</div>
-            )}
             <DecisionReplay g={g} result={r} />
             <InfoTip type="result" />
             <DebugPanel g={g} />
@@ -1351,7 +1480,9 @@ export default function Game() {
         INVALID: '這個選項目前不可用',
         ALREADY_READY: '你已經按過繼續了',
         NO_CHALLENGE: '挑戰次數已用完',
-        NOT_CHALLENGEABLE: '這球無法挑戰',
+        NOT_CHALLENGEABLE: '這球不是毫釐之差的判決，無法挑戰',
+        NO_RUNNER: '壘上沒有可牽制／盜壘的跑者',
+        PICKOFF_LIMIT: '這個打席的牽制次數已用完',
         ROOM_BUSY: '房間忙碌，請再試一次',
         NOT_FOUND: '房間不存在或已過期',
         FORBIDDEN: '你沒有這個房間的權限',
@@ -1388,13 +1519,14 @@ export default function Game() {
       screen = <PitcherScreen key={`p-${g.log.length}`} view={view} send={send} busy={busy} />;
     } else if (myTurnBatter) {
       screen = <BatterScreen key={`b-${g.log.length}`} view={view} send={send} busy={busy} />;
+    } else if (g.phase === 'pitcher' && view.role === battingKey(g.half)) {
+      screen = <OffenseWaitScreen view={view} send={send} busy={busy} />;
     } else {
-      const waitWhat = g.phase === 'pitcher' ? '對方投手正在配球…' : '對方打者正在反應…';
       screen = (
         <div className="max-w-xl mx-auto px-5 py-8">
           <Scoreboard g={g} />
           <Countdown deadline={g.deadline} serverNow={g.serverNow} />
-          <WaitingCard title={waitWhat} sub="猜猜他會怎麼出招（對方超時會被自動處理）" />
+          <WaitingCard title="對方打者正在反應…" sub="等待對方出棒（超時會被自動處理）" />
           <GameLog log={g.log} />
         </div>
       );

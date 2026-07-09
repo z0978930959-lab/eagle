@@ -9,6 +9,7 @@ import {
   actReadyNext,
   actChallenge,
   actPickoff,
+  actDeclareSteal,
   enforceTimeouts,
 } from '../../../../lib/gameLogic';
 import { getRoom, storeReady, withRoomLock, assertCode } from '../../../../lib/store';
@@ -70,6 +71,9 @@ export async function POST(req) {
             break;
           case 'pickoff':
             actPickoff(room, role);
+            break;
+          case 'declare_steal':
+            actDeclareSteal(room, role, payload);
             break;
           default:
             return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
