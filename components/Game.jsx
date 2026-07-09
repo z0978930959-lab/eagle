@@ -58,10 +58,15 @@ async function copyText(text) {
 // 好球帶 3x3 選取。支援多選（最多 maxCells 格，且需邊相連）：
 //  - selected: 可以是單一 cell id 字串，也可以是陣列（多選）
 //  - onSelect(next): next 為陣列。點擊已選格＝取消；點擊新格＝加入；破壞相連或超過上限則不加入
-function ZoneGrid({ selected, onSelect, maxCells = 3 }) {
+function ZoneGrid({ selected, onSelect, maxCells = 3, single = false }) {
   const selectedArr = Array.isArray(selected) ? selected : selected ? [selected] : [];
   const selSet = new Set(selectedArr);
   const handleClick = (key) => {
+    if (single) {
+      // 單選模式（投手選落點）：回傳「字串」而非陣列，點新格直接取代、點同格取消
+      onSelect(selected === key ? null : key);
+      return;
+    }
     if (selSet.has(key)) {
       // 取消：移除後仍要保持相連（單獨移除若讓其他格斷開就拒絕）
       const next = selectedArr.filter((k) => k !== key);
@@ -81,7 +86,7 @@ function ZoneGrid({ selected, onSelect, maxCells = 3 }) {
             const key = zoneId(r, c);
             const isHeart = r === 1 && c === 1;
             const isSel = selSet.has(key);
-            const canAdd = !isSel && selectedArr.length < maxCells && isCellsContiguous([...selectedArr, key]);
+            const canAdd = single || (!isSel && selectedArr.length < maxCells && isCellsContiguous([...selectedArr, key]));
             const disabledLook = !isSel && !canAdd;
             return (
               <button
@@ -99,7 +104,7 @@ function ZoneGrid({ selected, onSelect, maxCells = 3 }) {
         )}
       </div>
       <div className="text-[10px] text-field-chalk/45 text-center mt-1.5">
-        已選 {selectedArr.length}/{maxCells} 格・需邊相連（可再點取消）
+        {single ? '點選目標落點（再點一次取消）' : `已選 ${selectedArr.length}/${maxCells} 格・需邊相連（可再點取消）`}
       </div>
     </div>
   );
@@ -125,15 +130,36 @@ function PitchTypeRow({ selected, onSelect, favIds = [] }) {
 }
 
 // 投手體力血條：綠 > 黃 > 紅
-function StaminaBar({ pct, width = 'w-28' }) {
-  const color = pct > 50 ? 'bg-emerald-400' : pct > 25 ? 'bg-yellow-400' : 'bg-red-500';
+// 體力條：10 格電量式視覺，顏色隨體力由綠→黃→紅，低於 25% 閃爍警示
+function StaminaBar({ pct, width = 'w-28', pitchCount = null }) {
+  const zone = pct > 60 ? 'good' : pct > 25 ? 'warn' : 'bad';
+  const fill = {
+    good: 'bg-gradient-to-r from-emerald-500 to-emerald-300',
+    warn: 'bg-gradient-to-r from-amber-500 to-yellow-300',
+    bad: 'bg-gradient-to-r from-red-600 to-red-400',
+  }[zone];
+  const textColor = { good: 'text-emerald-300', warn: 'text-yellow-300', bad: 'text-red-300' }[zone];
   return (
     <div className="inline-flex items-center gap-1.5 align-middle">
       <span className="text-[10px] text-field-chalk/50">體力</span>
-      <div className={`${width} h-2.5 rounded-full bg-black/50 border border-field-chalk/20 overflow-hidden`}>
-        <div className={`h-full ${color} transition-all duration-500 ${pct <= 25 ? 'animate-pulse' : ''}`} style={{ width: `${pct}%` }} />
+      <div className={`relative ${width} h-3.5 rounded-md bg-black/60 border border-field-chalk/25 overflow-hidden`}>
+        {/* 電量填充 */}
+        <div
+          className={`h-full ${fill} transition-all duration-700 ease-out ${zone === 'bad' ? 'animate-pulse' : ''}`}
+          style={{ width: `${pct}%` }}
+        />
+        {/* 10 格刻度線 */}
+        <div className="absolute inset-0 flex pointer-events-none">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <div key={i} className="flex-1 border-r border-black/45" />
+          ))}
+          <div className="flex-1" />
+        </div>
+        {/* 高光 */}
+        <div className="absolute inset-x-0 top-0 h-[40%] bg-white/10 pointer-events-none" />
       </div>
-      <span className="text-[10px] font-mono-tc text-field-chalk/60">{pct}%</span>
+      <span className={`text-[10px] font-mono-tc font-bold ${textColor}`}>{pct}%</span>
+      {pitchCount != null && <span className="text-[10px] text-field-chalk/40 font-mono-tc">{pitchCount} 球</span>}
     </div>
   );
 }
@@ -260,10 +286,102 @@ function GameLog({ log }) {
   );
 }
 
+/* ---------------- 揮棒時機小遊戲 ----------------
+ * 打者確認出棒後彈出：光標在時機條上來回擺動（對方投手球威越高越快），
+ * 在中央甜蜜點按下「揮棒」拿高分。分數 0~100 送回伺服器放大/縮小打擊結果權重。
+ * 3.2 秒內沒出手＝完全沒跟上（低分自動送出）。
+ */
+function SwingTimingGame({ stuff = 50, actionLabel = '揮棒！', onDone }) {
+  const [pos, setPos] = useState(50);
+  const [result, setResult] = useState(null); // { score, label, tone }
+  const doneRef = useRef(false);
+  const posRef = useRef(50);
+  // 擺動週期：球威 50 → 900ms／趟；球威 90 → 660ms；封頂 480~1100ms
+  const periodRef = useRef(Math.max(480, Math.min(1100, 900 - (stuff - 50) * 6)));
+  // 隨機起始相位，避免背節奏
+  const startRef = useRef(performance.now() - Math.random() * periodRef.current * 2);
+
+  const finish = useCallback((score, p) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    let label, tone;
+    if (score >= 90) { label = '完美！'; tone = 'text-field-floodlight'; }
+    else if (score >= 70) { label = '不錯！'; tone = 'text-emerald-300'; }
+    else if (score >= 40) { label = '普通'; tone = 'text-field-chalk/80'; }
+    else { label = p < 50 ? '太早了…' : '太晚了…'; tone = 'text-red-300'; }
+    setResult({ score, label, tone });
+    setTimeout(() => onDone(score), 700);
+  }, [onDone]);
+
+  useEffect(() => {
+    let raf;
+    const period = periodRef.current;
+    const loop = (now) => {
+      if (doneRef.current) return;
+      if (now - startRef.current > 3200 + Math.random() * 0) {
+        finish(8, posRef.current); // 站著沒出手＝完全沒跟上
+        return;
+      }
+      const t = (now - startRef.current) % (period * 2);
+      const p = (t < period ? t / period : 2 - t / period) * 100; // 三角波 0→100→0
+      posRef.current = p;
+      setPos(p);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [finish]);
+
+  const swing = () => {
+    const p = posRef.current;
+    finish(Math.max(0, Math.round(100 - Math.abs(p - 50) * 2)), p);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center px-6 select-none">
+      <div className="text-field-chalk/70 text-sm mb-1">球來了——看準時機！</div>
+      <div className="text-[11px] text-field-chalk/40 mb-5">光標越靠近中央甜蜜點，擊球品質越好（對方球威越強，擺動越快）</div>
+
+      {/* 時機條 */}
+      <div className="relative w-full max-w-sm h-12 rounded-xl bg-black/70 border border-field-chalk/25 overflow-hidden">
+        {/* 分區底色：紅（沒跟上）→ 黃（普通）→ 綠（甜蜜點） */}
+        <div className="absolute inset-0 flex">
+          <div className="bg-red-900/60" style={{ width: '30%' }} />
+          <div className="bg-yellow-700/50" style={{ width: '12.5%' }} />
+          <div className="bg-emerald-600/60" style={{ width: '15%' }} />
+          <div className="bg-yellow-700/50" style={{ width: '12.5%' }} />
+          <div className="bg-red-900/60" style={{ width: '30%' }} />
+        </div>
+        {/* 甜蜜點中線 */}
+        <div className="absolute top-0 bottom-0 left-1/2 w-[2px] -translate-x-1/2 bg-field-floodlight/80" />
+        {/* 光標 */}
+        <div
+          className="absolute top-0 bottom-0 w-[5px] -ml-[2.5px] bg-white rounded shadow-[0_0_10px_rgba(255,255,255,0.9)]"
+          style={{ left: `${pos}%` }}
+        />
+      </div>
+
+      {result ? (
+        <div className={`mt-6 font-display text-3xl font-bold ${result.tone} animate-pulse`}>
+          {result.label}
+          <span className="ml-2 text-base font-mono-tc text-field-chalk/50">{result.score}</span>
+        </div>
+      ) : (
+        <button
+          onClick={swing}
+          className="mt-6 w-40 h-40 rounded-full bg-field-floodlight text-field-night font-display font-bold text-2xl active:scale-90 transition-transform shadow-[0_0_30px_rgba(255,200,60,0.35)]"
+        >
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function InfoTip({ type }) {
   const content = {
     pitcher: ['配球不是只拼最強球路。拿手球更穩，但越明顯越容易被鎖定。', '佈陣會被打者看見，等於你先亮一張心理戰線索。'],
-    batter: ['鎖定猜球獎勵最高，但猜反會很傷。保護打法適合對付變化球與拉打佈陣。', '方位猜法比較安全；單格猜中才是真正的大獎。'],
+    batter: ['鎖定猜球獎勵最高，但猜反會很傷。保護打法適合對付變化球與拉打佈陣。', '方位猜法比較安全；單格猜中才是真正的大獎。', '出棒後會進入「揮棒時機」：猜球決定你讀不讀得懂對手，時機決定你的手上功夫。'],
     result: ['結果畫面會揭曉雙方決策。看懂這一球，下一球才有反制空間。'],
   }[type];
   if (!content) return null;
@@ -455,7 +573,7 @@ function PitcherScreen({ view, send, busy }) {
           ・已投 {pitcher.pitchCount} 球
         </div>
         <div className="mt-1">
-          <StaminaBar pct={pitcher.stamina} />
+          <StaminaBar pct={pitcher.stamina} width="w-40" pitchCount={pitcher.pitchCount} />
         </div>
         <Countdown deadline={g.deadline} serverNow={g.serverNow} />
         <div className="text-[10px] text-field-chalk/35">時間到未配球＝失投紅中直球！</div>
@@ -511,7 +629,7 @@ function PitcherScreen({ view, send, busy }) {
 
       <div className="mt-5">
         <div className="text-sm mb-2 text-field-chalk/70 text-center">目標落點</div>
-        <ZoneGrid selected={zone} onSelect={setZone} />
+        <ZoneGrid selected={zone} onSelect={setZone} single />
       </div>
 
       <div className="mt-5">
@@ -554,6 +672,20 @@ function PitcherScreen({ view, send, busy }) {
         >
           比出敬遠手勢（自動故意四壞，直接保送這名打者）
         </button>
+        {(g.bases.first || g.bases.second) && (
+          <button
+            disabled={busy || (g.pickoffsThisPA ?? 0) >= 2}
+            onClick={() => send('pickoff')}
+            className="mt-1 px-4 py-1.5 rounded-full text-xs font-bold border border-field-floodlight/60 text-field-floodlight disabled:opacity-30 hover:bg-field-floodlight/10"
+          >
+            ⚡ 牽制{g.bases.second ? '二壘' : '一壘'}跑者（剩 {Math.max(0, 2 - (g.pickoffsThisPA ?? 0))} 次）
+          </button>
+        )}
+        {(g.bases.first || g.bases.second) && (
+          <div className="text-[10px] text-field-chalk/40 text-center max-w-[280px]">
+            牽制會重置你的配球倒數；有機率直接抓到離壘過大的跑者、也可能暴傳讓跑者推進（越疲勞越容易失誤，最高 20%）。跑者回壘後這一球更難盜壘成功
+          </div>
+        )}
       </div>
 
       <GameLog log={g.log} />
@@ -573,6 +705,7 @@ function BatterScreen({ view, send, busy }) {
   const [guessQuad, setGuessQuad] = useState(null); // quad 模式：單一方位
   const [steal, setSteal] = useState(null);
   const [showBench, setShowBench] = useState(false);
+  const [timingPayload, setTimingPayload] = useState(null); // 非 null＝時機小遊戲進行中，暫存待送 payload
 
   const bKey = battingKey(g.half);
   const fKey = fieldingKey(g.half);
@@ -625,7 +758,7 @@ function BatterScreen({ view, send, busy }) {
           {oppPitcher.fatigue > 0 && <span className="text-field-floodlight/80">，已顯疲態</span>}）
         </div>
         <div className="mt-0.5">
-          <StaminaBar pct={oppPitcher.stamina} width="w-24" />
+          <StaminaBar pct={oppPitcher.stamina} width="w-32" pitchCount={oppPitcher.pitchCount} />
         </div>
         <div>對方佈陣：<span className="text-field-chalk/80">{SHIFTS.find((sh) => sh.id === shift)?.name}</span></div>
       </div>
@@ -752,6 +885,11 @@ function BatterScreen({ view, send, busy }) {
       {mode !== 'hitrun' && (canStealFirst || canStealSecond) && (
         <div className="mt-5">
           <div className="text-sm mb-2 text-field-chalk/70 text-center">跑者盜壘（球沒被打進場內時發動）</div>
+          {(g.heldClose ?? 0) > 0 && (
+            <div className="text-[11px] text-red-300/90 text-center mb-2 animate-pulse">
+              ⚠️ 跑者剛被牽制回壘 ×{g.heldClose}——這一球盜壘成功率下降 {g.heldClose * 12}%
+            </div>
+          )}
           <div className="flex gap-2 justify-center flex-wrap">
             <button
               onClick={() => setSteal(null)}
@@ -782,21 +920,42 @@ function BatterScreen({ view, send, busy }) {
       <div className="mt-6 flex justify-center">
         <button
           disabled={!canConfirm || busy}
-          onClick={() =>
-            send('batter_submit', {
+          onClick={() => {
+            const payload = {
               mode,
               guessCat: mode === 'lock' ? guessCat : null,
               guessSpecies: mode === 'lock' && guessCat === 'breaking' ? guessSpecies : null,
               guessZoneKind: mode === 'lock' ? zoneKind : 'cell',
               guessZone: mode === 'lock' ? (zoneKind === 'quad' ? guessQuad : guessCells) : null,
               steal: mode === 'hitrun' ? null : steal,
-            })
-          }
+            };
+            if (mode === 'take') {
+              send('batter_submit', payload); // 不揮棒＝沒有時機可言
+            } else {
+              setTimingPayload(payload); // 進入揮棒時機小遊戲
+            }
+          }}
           className="px-8 py-2.5 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30"
         >
           {mode === 'take' ? '不揮棒' : mode === 'bunt' ? '擺短棒' : '出棒'}
         </button>
+        {mode !== 'take' && (
+          <div className="ml-3 self-center text-[10px] text-field-chalk/40 max-w-[130px]">
+            按下後進入揮棒時機——抓準甜蜜點才有好結果
+          </div>
+        )}
       </div>
+
+      {timingPayload && (
+        <SwingTimingGame
+          stuff={oppPitcher.effStuff}
+          actionLabel={mode === 'bunt' ? '出棒點放！' : '揮棒！'}
+          onDone={(score) => {
+            setTimingPayload(null);
+            send('batter_submit', { ...timingPayload, timing: score });
+          }}
+        />
+      )}
 
       <GameLog log={g.log} />
     </div>
@@ -826,6 +985,7 @@ function batterGuessText(c) {
 function pitchChoiceText(choice) {
   if (!choice) return '—';
   if (choice.zoneTarget === 'ibb') return '敬遠';
+  if (choice.zoneTarget === 'pickoff') return '牽制';
   const type = PITCH_TYPE_MAP[choice.typeId]?.name || choice.typeId || '—';
   const zone = choice.zoneTarget === 'waste'
     ? '故意壞球'
@@ -850,6 +1010,7 @@ function DecisionReplay({ g, result }) {
         bunt: '觸擊短打',
         hitrun: '打帶跑',
         ibb: '敬遠',
+        pickoff: '—（牽制事件）',
       }[result.batterChoice?.mode] || '—';
   const steal = result.batterChoice?.steal
     ? result.batterChoice.steal === 'first' ? '一壘跑者啟動' : '二壘跑者啟動'
@@ -861,6 +1022,9 @@ function DecisionReplay({ g, result }) {
         ['投手決策', pitchChoiceText(result.pitcherChoice)],
         ['守備佈陣', shiftText(g, result)],
         ['打者反應', batter],
+        ...(result.batterChoice?.timing != null
+          ? [['揮棒時機', `${result.batterChoice.timingLabel}（${result.batterChoice.timing} 分）`]]
+          : []),
         ['跑壘企圖', steal],
         ['實際結果', actual],
       ].map(([label, value]) => (
@@ -965,23 +1129,38 @@ function ResultScreen({ view, send, busy }) {
   const r = g.lastResult;
   const iAmReady = g.ready[view.role];
   const lines = r.narration && r.narration.length > 0 ? r.narration : null;
-  const [shown, setShown] = useState(0);
 
-  // 逐句播報（每次結果更新或挑戰改判時重播）
+  // 逐字打字機播報：每 45ms 出一個字，每句結尾停頓一拍（約 0.6 秒）再進下一句
+  const LINE_PAUSE = 13; // 句尾虛擬停頓字數（13 × 45ms ≈ 0.6s）
+  const CHAR_MS = 45;
+  const budgets = lines ? lines.map((ln) => ln.length + LINE_PAUSE) : [];
+  const totalTicks = budgets.reduce((a, b) => a + b, 0);
+  const [tick, setTick] = useState(0);
+
   useEffect(() => {
     if (!lines) return;
-    setShown(1);
-    let i = 1;
+    setTick(0);
     const t = setInterval(() => {
-      i += 1;
-      setShown(i);
-      if (i >= lines.length) clearInterval(t);
-    }, 1000);
+      setTick((c) => {
+        if (c + 1 >= totalTicks) clearInterval(t);
+        return c + 1;
+      });
+    }, CHAR_MS);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [r.summary, r.challenge?.success]);
 
-  const done = !lines || shown >= lines.length;
+  // 依 tick 換算每一句目前顯示到第幾個字
+  let remain = tick;
+  const lineStates = budgets.map((budget, i) => {
+    const chars = Math.max(0, Math.min(lines[i].length, remain));
+    const started = remain > 0;
+    const typing = started && remain < budget;
+    remain -= budget;
+    return { chars, started, typing };
+  });
+
+  const done = !lines || tick >= totalTicks;
   const myChallenges = g.challenges?.[view.role] ?? 0;
   const canChallenge = done && !iAmReady && r.challengeable && myChallenges > 0 && !r.challenge;
 
@@ -998,15 +1177,20 @@ function ResultScreen({ view, send, busy }) {
 
         {lines && (
           <div className="text-left max-w-md mx-auto space-y-2 min-h-[90px]">
-            {lines.slice(0, shown).map((ln, i) => (
-              <div
-                key={i}
-                className={`text-[15px] leading-relaxed ${i === shown - 1 && !done ? 'text-field-chalk animate-pulse' : 'text-field-chalk/75'}`}
-              >
-                <span className="text-field-floodlight/60 mr-1.5">▸</span>
-                {ln}
-              </div>
-            ))}
+            {lines.map((ln, i) => {
+              const st = lineStates[i];
+              if (!st.started) return null;
+              return (
+                <div
+                  key={i}
+                  className={`text-[15px] leading-relaxed ${st.typing ? 'text-field-chalk' : 'text-field-chalk/75'}`}
+                >
+                  <span className="text-field-floodlight/60 mr-1.5">▸</span>
+                  {ln.slice(0, st.chars)}
+                  {st.typing && <span className="inline-block w-[2px] h-[1em] bg-field-floodlight/80 align-middle ml-0.5 animate-pulse" />}
+                </div>
+              );
+            })}
           </div>
         )}
 
