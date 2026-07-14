@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { TEAMS, PITCH_TYPES, SHIFTS, ROLE_NAMES, zoneId, zoneLabel, batsLabel, throwsLabel } from '../data/teams';
-import { PITCH_TYPE_MAP, gradeOf, GRADE_PARAMS, FIELD, clampCanvas, zoneLabelFromXY, SWEET_RADIUS, CONTACT_RADIUS, POWER_SWEET_RADIUS, POWER_CONTACT_RADIUS } from '../lib/engine';
+import { PITCH_TYPE_MAP, gradeOf, GRADE_PARAMS, FIELD, clampCanvas, zoneLabelFromXY, SWEET_RADIUS, CONTACT_RADIUS, POWER_SWEET_RADIUS, POWER_CONTACT_RADIUS, flightPointAt, swingWindowsOf } from '../lib/engine';
 import { battingKey, fieldingKey, currentPitcher, staminaOf } from '../lib/gameLogic';
 
 const POLL_MS = 2000;
@@ -349,59 +349,105 @@ function GameLog({ log }) {
   );
 }
 
-/* ---------------- 打者即時反應瞄準 ----------------
- * 投手出手後短暫醞釀，接著球沿伺服器算好的路徑（path，二次貝茲曲線）
- * 連續飛行——直球幾乎一閃而逝、變化球看得出轉彎弧線。玩家全程按住
- * 拖曳球棒即時瞄準；球「到位」（飛行結束＝到捕手手套）的當下，取樣
- * 這一刻的球棒位置送回伺服器判定命中品質。強力打擊縮小甜蜜／接觸
- * 半徑換取更高上限。這裡顯示的命中判定僅供即時回饋，正式結果以伺服
- * 器為準，會在結果畫面完整揭曉。
+/* ---------------- 打者即時反應（真實揮棒版） ----------------
+ * 「按住畫面」＝持棒瞄準：球棒圖示跟著手指/滑鼠移動，甜蜜點（棒身上
+ * 的球標）就是要對準來球的位置。「放開的一瞬間」＝揮棒——由放開時機
+ * （vs 球到位時刻，時機窗依球速決定：直球窄、變化球寬）、放開當下甜
+ * 蜜點與球的距離、以及球種，共同決定擊球結果。
+ * 球沿伺服器算好的真實軌跡飛行：直球直線一閃而逝；滑球前段像直球、
+ * 中段向外橫移；曲球出手就是大弧線；指叉/變速前段完全像直球，末段
+ * 才突然下墜。本地顯示的判定僅供即時回饋，正式結果以伺服器為準。
  */
-function BatAimGame({ path, powerMode = false, onDone }) {
+function BatCursor({ leftPct, topPct }) {
+  return (
+    <div className="absolute pointer-events-none z-10" style={{ left: `${leftPct}%`, top: `${topPct}%` }}>
+      <svg width="120" height="120" viewBox="0 0 120 120" className="absolute drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]" style={{ left: '-26px', top: '-26px' }}>
+        <g transform="rotate(38 26 26)">
+          {/* 棒身：棒頭在甜蜜點側，往右下收成握把 */}
+          <path
+            d="M8 17.5 Q1.5 26 8 34.5 L58 31.5 L99 29 Q103.5 26 99 23 L58 20.5 Z"
+            fill="#3ec6cf"
+            stroke="#0e7c86"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          {/* 握把尾 */}
+          <circle cx="102.5" cy="26" r="5.5" fill="#3ec6cf" stroke="#0e7c86" strokeWidth="2" />
+          {/* 甜蜜點球標：對準這裡打 */}
+          <circle cx="26" cy="26" r="7" fill="#fff" stroke="#d63b3b" strokeWidth="1.5" />
+          <path d="M21.5 21.5 Q26 26 21.5 30.5 M30.5 21.5 Q26 26 30.5 30.5" stroke="#d63b3b" strokeWidth="1.3" fill="none" />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+function BatAimGame({ path, mode = 'normal', onDone }) {
+  const powerMode = mode === 'power';
   const [stage, setStage] = useState('windup'); // windup | flying | done
   const [ballPos, setBallPos] = useState(null); // {x,y} 連續座標（伺服器尺度）
-  const [batPos, setBatPos] = useState({ x: 50, y: 50 });
+  const [batPos, setBatPos] = useState({ x: 50, y: 62 });
+  const [held, setHeld] = useState(false);
   const [verdict, setVerdict] = useState(null);
   const boardRef = useRef(null);
   const doneRef = useRef(false);
-  const batPosRef = useRef({ x: 50, y: 50 });
+  const batPosRef = useRef({ x: 50, y: 62 });
+  const trailRef = useRef([]); // 殘影：最近幾個球位置
   const rafRef = useRef(null);
+  const graceRef = useRef(null);
+  const arrivalRef = useRef(null); // 球「到位」的 performance.now 時刻
+  const stageRef = useRef('windup');
 
   const sweetR = powerMode ? POWER_SWEET_RADIUS : SWEET_RADIUS;
   const contactR = powerMode ? POWER_CONTACT_RADIUS : CONTACT_RADIUS;
+  const windows = swingWindowsOf(path.durationMs, mode);
+  const LATE_GRACE_MS = 250; // 球進手套後仍可補揮的緩衝（會被算成「太晚」）
 
-  const bezierAt = (t) => {
-    const mt = 1 - t;
-    return {
-      x: mt * mt * path.startX + 2 * mt * t * path.controlX + t * t * path.endX,
-      y: mt * mt * path.startY + 2 * mt * t * path.controlY + t * t * path.endY,
-    };
-  };
-
-  const finish = () => {
+  const finish = (swing) => {
     if (doneRef.current) return;
     doneRef.current = true;
+    if (graceRef.current) clearTimeout(graceRef.current);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    stageRef.current = 'done';
     setStage('done');
-    const bat = batPosRef.current;
-    const dist = Math.hypot(bat.x - path.endX, bat.y - path.endY);
-    setVerdict(
-      dist <= sweetR ? { label: '完美咬中！', tone: 'text-field-floodlight' }
-      : dist <= contactR ? { label: '有碰到！', tone: 'text-emerald-300' }
-      : { label: '揮空……', tone: 'text-red-300' }
-    );
-    setTimeout(() => onDone({ batX: bat.x, batY: bat.y }), 600);
+
+    if (!swing) {
+      setVerdict({ label: '沒出棒……', tone: 'text-field-chalk/70' });
+      setTimeout(() => onDone({ batX: null, batY: null, swingDelta: null }), 500);
+      return;
+    }
+    const ad = Math.abs(swing.delta);
+    const dist = Math.hypot(swing.x - path.endX, swing.y - path.endY);
+    let v;
+    if (ad > windows.contact) {
+      v = swing.delta < 0 ? { label: '太早出棒——揮空！', tone: 'text-red-300' } : { label: '太晚出棒——揮空！', tone: 'text-red-300' };
+    } else if (dist > contactR) {
+      v = { label: '位置沒對上——揮空！', tone: 'text-red-300' };
+    } else if (dist <= sweetR && ad <= windows.perfect) {
+      v = { label: '完美咬中！', tone: 'text-field-floodlight' };
+    } else {
+      v = { label: '有碰到！', tone: 'text-emerald-300' };
+    }
+    setVerdict(v);
+    setTimeout(() => onDone({ batX: swing.x, batY: swing.y, swingDelta: swing.delta }), 650);
   };
 
   useEffect(() => {
-    const windupMs = 500 + Math.random() * 600;
+    const windupMs = 600 + Math.random() * 700;
     const windupTimer = setTimeout(() => {
+      stageRef.current = 'flying';
       setStage('flying');
       const flyStart = performance.now();
+      arrivalRef.current = flyStart + path.durationMs;
       const loop = (now) => {
+        if (doneRef.current) return;
         const t = Math.min(1, (now - flyStart) / path.durationMs);
-        setBallPos(bezierAt(t));
+        const p = flightPointAt(path, t);
+        trailRef.current = [...trailRef.current.slice(-3), p];
+        setBallPos(p);
         if (t >= 1) {
-          finish();
+          // 球進手套：短暫緩衝內放開仍算（太晚的）揮棒，否則視為沒出棒
+          graceRef.current = setTimeout(() => finish(null), LATE_GRACE_MS);
           return;
         }
         rafRef.current = requestAnimationFrame(loop);
@@ -410,6 +456,7 @@ function BatAimGame({ path, powerMode = false, onDone }) {
     }, windupMs);
     return () => {
       clearTimeout(windupTimer);
+      if (graceRef.current) clearTimeout(graceRef.current);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -427,8 +474,7 @@ function BatAimGame({ path, powerMode = false, onDone }) {
     };
   };
 
-  const handlePointer = (e) => {
-    if (stage === 'done') return;
+  const updateBat = (e) => {
     const pos = posFromPoint(e.clientX, e.clientY);
     if (pos) {
       batPosRef.current = pos;
@@ -436,24 +482,51 @@ function BatAimGame({ path, powerMode = false, onDone }) {
     }
   };
 
+  const onDown = (e) => {
+    if (doneRef.current) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setHeld(true);
+    updateBat(e);
+  };
+  const onMove = (e) => {
+    if (doneRef.current || e.buttons === 0) return;
+    updateBat(e);
+  };
+  const onUp = (e) => {
+    if (doneRef.current) return;
+    updateBat(e);
+    setHeld(false);
+    // 放開＝揮棒：只有球出手後的放開才算（醞釀期放開＝重新持棒即可）
+    if (stageRef.current === 'flying' && arrivalRef.current != null) {
+      const delta = Math.round(performance.now() - arrivalRef.current);
+      finish({ ...batPosRef.current, delta });
+    }
+  };
+
   const ballPct = ballPos ? { x: toBoardPct(ballPos.x), y: toBoardPct(ballPos.y) } : null;
   const batPct = { x: toBoardPct(batPos.x), y: toBoardPct(batPos.y) };
-  const sweetPct = (sweetR / CANVAS_SPAN) * 100;
   const contactPct = (contactR / CANVAS_SPAN) * 100;
+  const trail = trailRef.current.slice(0, -1);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center px-5 select-none touch-none">
-      <div className="text-field-chalk/70 text-sm mb-1">
-        {stage === 'windup' ? '投手抬腿了……盯緊球！' : stage === 'flying' ? '球來了——把球棒拖到球的位置！！' : ''}
+      <div className="text-field-chalk/85 text-sm font-bold mb-1">
+        {stage === 'windup' ? '投手抬腿——按住畫面持棒！' : stage === 'flying' ? '放開的一瞬間＝揮棒！' : ''}
       </div>
-      <div className="text-[11px] text-field-chalk/40 mb-4">
-        {powerMode ? '⚡ 強力打擊：甜蜜區更小、打偏更傷，但咬中就是大的' : '直球幾乎一閃而逝；變化球中途會轉彎，別被騙了'}
+      <div className="text-[11px] text-field-chalk/45 mb-4 text-center max-w-[300px]">
+        {mode === 'bunt'
+          ? '把棒身上的球標貼到來球，輕輕放開＝出棒觸擊'
+          : powerMode
+            ? '⚡ 強力打擊：時機窗與甜蜜點都更小——但咬中就是大的'
+            : '球標對準來球、時機到就放開。直球一閃而逝；變化球會轉彎，盯到最後再出手'}
       </div>
 
       <div
         ref={boardRef}
-        onPointerDown={(e) => { e.currentTarget.setPointerCapture?.(e.pointerId); handlePointer(e); }}
-        onPointerMove={(e) => { if (e.buttons > 0) handlePointer(e); }}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
         className="relative w-full max-w-[320px] aspect-square rounded-xl bg-black/60 border-2 border-field-chalk/25 overflow-hidden touch-none cursor-crosshair"
       >
         {/* 好球帶參考框 */}
@@ -462,25 +535,37 @@ function BatAimGame({ path, powerMode = false, onDone }) {
           style={{ left: `${ZONE_START_PCT}%`, top: `${ZONE_START_PCT}%`, right: `${100 - ZONE_END_PCT}%`, bottom: `${100 - ZONE_END_PCT}%` }}
         />
 
-        {/* 球棒：甜蜜點＋接觸環，按住拖曳即時瞄準 */}
-        <div className="absolute pointer-events-none" style={{ left: `${batPct.x}%`, top: `${batPct.y}%` }}>
-          <div
-            className="absolute rounded-full border border-field-floodlight/30 -translate-x-1/2 -translate-y-1/2"
-            style={{ width: `${contactPct * 2}%`, height: `${contactPct * 2}%` }}
-          />
-          <div
-            className="absolute rounded-full bg-field-floodlight/25 border-2 border-field-floodlight -translate-x-1/2 -translate-y-1/2"
-            style={{ width: `${sweetPct * 2}%`, height: `${sweetPct * 2}%` }}
-          />
-        </div>
+        {/* 有效接觸範圍參考環（以甜蜜點為圓心，直接畫在看板上） */}
+        <div
+          className={`absolute rounded-full border -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-opacity ${held ? 'border-field-floodlight/35 opacity-100' : 'border-white/15 opacity-60'}`}
+          style={{ left: `${batPct.x}%`, top: `${batPct.y}%`, width: `${contactPct * 2}%`, height: `${contactPct * 2}%` }}
+        />
 
-        {/* 球體：沿伺服器給的飛行路徑即時內插，直球幾乎一閃而逝 */}
+        {/* 球棒游標：甜蜜點＝棒身上的球標 */}
+        <BatCursor leftPct={batPct.x} topPct={batPct.y} />
+
+        {/* 球的殘影（讀軌跡用，不預告未來） */}
+        {stage !== 'windup' && trail.map((p, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full bg-white/20 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ left: `${toBoardPct(p.x)}%`, top: `${toBoardPct(p.y)}%`, width: `${8 + i * 3}px`, height: `${8 + i * 3}px` }}
+          />
+        ))}
+
+        {/* 球體：沿真實軌跡飛行 */}
         {ballPct && stage !== 'windup' && (
           <div
             className="absolute w-6 h-6 rounded-full bg-white -translate-x-1/2 -translate-y-1/2 shadow-[0_0_14px_rgba(255,255,255,0.85)] pointer-events-none"
             style={{ left: `${ballPct.x}%`, top: `${ballPct.y}%` }}
           >
             <div className="absolute inset-0 rounded-full border-[2.5px] border-transparent border-l-red-500 border-r-red-500 rotate-12" />
+          </div>
+        )}
+
+        {stage === 'windup' && !held && (
+          <div className="absolute inset-x-0 bottom-3 text-center pointer-events-none">
+            <span className="text-xs text-field-floodlight bg-black/50 rounded-full px-3 py-1 animate-pulse">👆 按住畫面持棒</span>
           </div>
         )}
       </div>
@@ -586,15 +671,29 @@ function SwingTimingGame({ stuff = 50, actionLabel = '揮棒！', onDone }) {
 
 function InfoTip({ type }) {
   const content = {
-    pitcher: ['S/A 是拿手球路：更不容易失投、位移也更急更快。B/C 陌生球路容易被咬中，疲勞還會讓全部等級下修。', '球可以拖到好球帶內任意位置，甚至拖出帶外——變化球會真的沿弧線飛行；出手時機條太差＝失投紅中。', '壘上有人時可牽制——如果對方剛好下了盜壘暗號，大概率直接抓死。'],
-    batter: ['球來了就把球棒拖到球的位置。直球幾乎一閃而逝，變化球看得出弧線但會轉彎，別被騙！', '球到位那一刻球棒在甜蜜點內＝有效擊球；切到球的上緣偏滾地、下緣偏飛球。', '強力打擊全壘打大增，但甜蜜區更小、打偏更傷。看球可以磨球數，壞球區的球別追。'],
-    result: ['結果畫面會揭曉雙方決策。看懂這一球，下一球才有反制空間。', '只有「毫釐之差」的刺殺 play 才能挑戰；高飛接殺挑戰必維持原判。'],
+    pitcher: [
+      'S/A 是拿手球路：更不容易失投、位移也更急更快。B/C 陌生球路容易被咬中，疲勞還會讓全部等級下修。',
+      '球可拖到帶內任意位置、甚至帶外。每種球路的軌跡不同：直球最快最直、滑球外竄、曲球大弧線、指叉/變速末段下墜。',
+      '出手時機條太差＝失投紅中。壘上有人時可牽制——若對方剛好下了盜壘暗號，大概率直接抓死。',
+    ],
+    batter: [
+      '按住畫面＝持棒瞄準（棒身上的球標＝甜蜜點），放開的一瞬間＝揮棒。時機與位置都對才算咬中。',
+      '直球一閃而逝、時機窗最窄；滑球中段外竄、曲球大弧線好認；指叉/變速前段完全像直球、末段才下墜——盯到最後再出手。',
+      '切到球的上緣偏滾地、下緣偏飛球。強力打擊咬中就是大的但更難；壞球區的球別追。',
+    ],
+    result: [
+      '結果畫面會揭曉雙方決策。看懂這一球，下一球才有反制空間。',
+      '只有「毫釐之差」的刺殺 play 才能挑戰；高飛接殺挑戰必維持原判。',
+    ],
   }[type];
   if (!content) return null;
   return (
-    <div className="mt-3 rounded-lg border border-field-floodlight/20 bg-black/25 px-3 py-2 text-[11px] leading-relaxed text-field-chalk/55">
-      {content.map((t) => <div key={t}>{t}</div>)}
-    </div>
+    <details className="mt-4 rounded-lg border border-field-chalk/15 bg-black/25 max-w-md mx-auto">
+      <summary className="cursor-pointer px-3 py-2 text-xs text-field-chalk/55 select-none">📖 玩法提示（點開查看）</summary>
+      <div className="px-3 pb-2.5 text-[11px] leading-relaxed text-field-chalk/55 space-y-1.5">
+        {content.map((t) => <div key={t}>・{t}</div>)}
+      </div>
+    </details>
   );
 }
 
@@ -655,7 +754,7 @@ function Lobby({ onEnter, error }) {
 
   return (
     <div className="max-w-xl mx-auto px-5 py-10">
-      <h1 className="font-display text-3xl font-black tracking-wide text-center mb-1">中職夜戰</h1>
+      <h1 className="font-display text-3xl font-black tracking-wide text-center mb-1">中職對戰</h1>
       <p className="text-center text-field-chalk/60 text-sm mb-8">線上雙人・逐球猜球心理戰</p>
 
       <div className="flex gap-2 mb-6">
@@ -831,14 +930,12 @@ function PitcherScreen({ view, send, busy }) {
       )}
 
       <div className="mt-5">
-        <div className="text-sm mb-2 text-field-chalk/70 text-center">
-          球種等級 <GradeBadge grade="S" /><GradeBadge grade="A" /> 擅長・<GradeBadge grade="B" /><GradeBadge grade="C" /> 陌生（C 級失投率高、被打擊率 +10%）
-        </div>
+        <div className="text-sm mb-2 text-field-chalk/80 text-center font-bold">① 選球種<span className="font-normal text-field-chalk/45 text-xs ml-2">（S/A 拿手・B/C 陌生易失投）</span></div>
         <PitchTypeRow selected={typeId} onSelect={setTypeId} pitcher={pitcher} />
       </div>
 
       <div className="mt-5">
-        <div className="text-sm mb-2 text-field-chalk/70 text-center">拖曳球體到目標位置</div>
+        <div className="text-sm mb-2 text-field-chalk/80 text-center font-bold">② 拖曳落點</div>
         <PitchTargetBoard typeId={typeId} target={target} onTarget={setTarget} waste={waste} onWasteChange={setWaste} />
         {target && (
           <div className="text-[11px] text-field-chalk/50 text-center mt-1.5">
@@ -849,7 +946,7 @@ function PitcherScreen({ view, send, busy }) {
       </div>
 
       <div className="mt-5">
-        <div className="text-sm mb-2 text-field-chalk/70 text-center">守備佈陣（打者看得到）</div>
+        <div className="text-sm mb-2 text-field-chalk/80 text-center font-bold">③ 守備佈陣<span className="font-normal text-field-chalk/45 text-xs ml-2">（打者看得到）</span></div>
         <div className="flex gap-2 justify-center flex-wrap">
           {SHIFTS.map((sh) => (
             <button
@@ -916,10 +1013,10 @@ function PitcherScreen({ view, send, busy }) {
 /* ---------------- 打者回合 ---------------- */
 
 const BATTER_MODES = [
-  { id: 'take', name: '不打擊', desc: '目視這一球，考驗選球（壞球免費、好球挨一顆）' },
-  { id: 'normal', name: '打擊', desc: '均衡出棒，反應窗正常' },
-  { id: 'power', name: '強力打擊', desc: '反應窗 -15%、打偏更傷；咬中就是長打或紅不讓' },
-  { id: 'bunt', name: '觸擊短棒', desc: '犧牲推進跑者（時機條決定觸擊品質）' },
+  { id: 'take', name: '不打擊', desc: '目送這一球（壞球免費、好球挨一顆）' },
+  { id: 'normal', name: '打擊', desc: '均衡出棒，時機窗正常' },
+  { id: 'power', name: '強力打擊', desc: '時機窗 -15%、甜蜜點更小；咬中就是長打或紅不讓' },
+  { id: 'bunt', name: '觸擊短棒', desc: '犧牲推進跑者，時機窗最寬（碰到就好）' },
 ];
 
 function BatterScreen({ view, send, busy }) {
@@ -942,46 +1039,55 @@ function BatterScreen({ view, send, busy }) {
 
   return (
     <div className="max-w-xl mx-auto px-5 py-8">
-      <div className="text-center mb-4">
+      <div className="text-center mb-3">
         <div className="text-xs text-field-chalk/50">你是進攻方・對方已出手，準備反應</div>
-        <div className="font-display text-xl font-bold" style={{ color: side.team.color }}>
-          {side.team.name}｜第 {(side.lineupIdx % side.lineup.length) + 1} 棒 {batter.name}
-          <ForeignTag show={batter.foreign} />
-        </div>
-        <div className="text-[11px] text-field-chalk/40 mt-0.5">
-          {batsLabel(batter.bats)} ・力量 {batter.power} ・準度 {batter.contact} ・選球眼 {batter.eye} ・速度 {batter.speed}
-        </div>
         <Countdown deadline={g.deadline} serverNow={g.serverNow} />
         <div className="text-[10px] text-field-chalk/35">時間到未選擇＝自動不揮棒</div>
       </div>
       <Scoreboard g={g} />
-      <InfoTip type="batter" />
 
-      <div className="mt-3 text-center text-xs text-field-chalk/55 space-y-0.5">
-        <div>
-          對方投手：{ROLE_NAMES[oppPitcher.role]} {oppPitcher.name}
-          <ForeignTag show={oppPitcher.foreign} />（{throwsLabel(oppPitcher.throws)}・擅長：
-          {oppPitcher.fav.map((f) => PITCH_TYPE_MAP[f].name).join('、')}
-          {oppPitcher.fatigue > 0 && <span className="text-field-floodlight/80">，已顯疲態</span>}）
+      {/* 對戰情報卡：左＝我方打者、右＝敵方投手，一眼看完 */}
+      <div className="mt-3 grid grid-cols-2 gap-2 text-left">
+        <div className="rounded-xl bg-black/30 border border-field-chalk/12 px-3 py-2.5">
+          <div className="text-[10px] text-field-chalk/40 mb-1">我方打者</div>
+          <div className="font-display font-bold text-sm leading-tight" style={{ color: side.team.color }}>
+            第 {(side.lineupIdx % side.lineup.length) + 1} 棒 {batter.name}
+            <ForeignTag show={batter.foreign} />
+          </div>
+          <div className="text-[10px] text-field-chalk/50 mt-1 leading-relaxed">
+            {batsLabel(batter.bats)}<br />
+            力 {batter.power}／準 {batter.contact}／眼 {batter.eye}／速 {batter.speed}
+          </div>
+          <button
+            onClick={() => setShowBench(!showBench)}
+            disabled={availableBench.length === 0}
+            className="mt-1.5 text-[11px] border border-field-chalk/25 rounded-full px-2.5 py-0.5 disabled:opacity-30"
+          >
+            代打（剩 {availableBench.length}）
+          </button>
         </div>
-        <div className="mt-0.5">
-          <StaminaBar pct={oppPitcher.stamina} width="w-32" pitchCount={oppPitcher.pitchCount} />
+        <div className="rounded-xl bg-black/30 border border-field-chalk/12 px-3 py-2.5">
+          <div className="text-[10px] text-field-chalk/40 mb-1">敵方投手</div>
+          <div className="font-display font-bold text-sm leading-tight text-field-chalk/90">
+            {ROLE_NAMES[oppPitcher.role]} {oppPitcher.name}
+            <ForeignTag show={oppPitcher.foreign} />
+          </div>
+          <div className="text-[10px] text-field-chalk/50 mt-1 leading-relaxed">
+            {throwsLabel(oppPitcher.throws)}・擅長 {oppPitcher.fav.map((f) => PITCH_TYPE_MAP[f].name).join('、')}
+            {oppPitcher.fatigue > 0 && <span className="text-field-floodlight/80">（顯疲態）</span>}
+            <br />佈陣：{SHIFTS.find((sh) => sh.id === shift)?.name}
+          </div>
+          <div className="mt-1.5">
+            <StaminaBar pct={oppPitcher.stamina} width="w-20" pitchCount={oppPitcher.pitchCount} />
+          </div>
         </div>
-        <div>對方佈陣：<span className="text-field-chalk/80">{SHIFTS.find((sh) => sh.id === shift)?.name}</span></div>
-        {g.pendingSteal && (
-          <div className="text-field-floodlight font-bold animate-pulse">🏃 跑者已啟動盜壘（{g.pendingSteal.base === 'double' ? '雙盜壘！' : g.pendingSteal.base === 'first' ? '一壘→二壘' : '二壘→三壘'}）</div>
-        )}
       </div>
 
-      <div className="mt-3 flex justify-center">
-        <button
-          onClick={() => setShowBench(!showBench)}
-          disabled={availableBench.length === 0}
-          className="text-xs border border-field-chalk/25 rounded-full px-3 py-1 disabled:opacity-30"
-        >
-          代打（剩 {availableBench.length} 人）
-        </button>
-      </div>
+      {g.pendingSteal && (
+        <div className="mt-2 text-center text-xs text-field-floodlight font-bold animate-pulse">
+          🏃 跑者已啟動盜壘（{g.pendingSteal.base === 'double' ? '雙盜壘！' : g.pendingSteal.base === 'first' ? '一壘→二壘' : '二壘→三壘'}）
+        </div>
+      )}
       {showBench && (
         <div className="mt-2 flex flex-col gap-1.5 max-w-[320px] mx-auto">
           {side.bench.map((b, i) => (
@@ -1026,27 +1132,29 @@ function BatterScreen({ view, send, busy }) {
         <button
           disabled={busy}
           onClick={() => {
-            if (mode === 'take') submit({ batX: null, batY: null });
+            if (mode === 'take') submit({ batX: null, batY: null, swingDelta: null });
             else setReacting(true);
           }}
           className="px-8 py-2.5 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30"
         >
-          {mode === 'take' ? '目送這一球' : mode === 'bunt' ? '擺短棒（進入瞄準）' : '站上打擊區（進入反應）'}
+          {mode === 'take' ? '目送這一球' : mode === 'bunt' ? '擺短棒（進入反應）' : '站上打擊區（進入反應）'}
         </button>
         {mode !== 'take' && (
-          <div className="text-[10px] text-field-chalk/40 text-center max-w-[260px]">
-            {mode === 'bunt' ? '把球棒輕輕貼到球的位置＝完美觸擊' : '球飛過來時把球棒拖到球的位置——變化球中途會轉彎，別被騙！'}
+          <div className="text-[10px] text-field-chalk/40 text-center max-w-[280px]">
+            按住畫面持棒瞄準，<span className="text-field-floodlight/80 font-bold">放開的一瞬間＝揮棒</span>——時機與位置都要對
           </div>
         )}
       </div>
 
+      <InfoTip type="batter" />
+
       {reacting && path && (
         <BatAimGame
           path={path}
-          powerMode={mode === 'power'}
-          onDone={({ batX, batY }) => {
+          mode={mode}
+          onDone={({ batX, batY, swingDelta }) => {
             setReacting(false);
-            submit({ batX, batY });
+            submit({ batX, batY, swingDelta });
           }}
         />
       )}
@@ -1129,8 +1237,12 @@ function batterModeText(c) {
   };
   let t = names[c.mode] || '—';
   if (c.mode === 'normal' || c.mode === 'power' || c.mode === 'bunt') {
-    if (c.batX != null && c.batY != null) t += `・球棒落點 ${zoneLabelFromXY(c.batX, c.batY)}`;
-    else t += '・沒跟上（未出棒）';
+    if (c.batX != null && c.batY != null) {
+      t += `・揮棒點 ${zoneLabelFromXY(c.batX, c.batY)}`;
+      if (c.swingDelta != null) {
+        t += c.swingDelta === 0 ? '・時機正點' : `・出棒${c.swingDelta < 0 ? '早' : '晚'} ${Math.abs(c.swingDelta)}ms`;
+      }
+    } else t += '・沒出棒';
   }
   return t;
 }
