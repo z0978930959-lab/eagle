@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { viewFor, roleOf, enforceTimeouts } from '../../../../lib/gameLogic';
+import { bingoViewFor } from '../../../../lib/bingoLogic';
 import { getRoom, storeReady, withRoomLock, assertCode } from '../../../../lib/store';
 import { errorResponseInfo } from '../../../../lib/apiError';
 
@@ -33,6 +34,9 @@ export async function POST(req) {
       if (!room) return NextResponse.json({ error: 'NOT_FOUND', message: '房間不存在或已過期' }, { status: 404 });
       const role = roleOf(room, token);
       if (!role) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 });
+      if (room.type === 'bingo') {
+        return NextResponse.json({ view: bingoViewFor(room, role) });
+      }
       // 超時強制判定（任一方輪詢就會觸發，斷線方也擋不住比賽前進）
       if (enforceTimeouts(room)) await guardedSetRoom(code, room);
       return NextResponse.json({ view: viewFor(room, role) });

@@ -330,7 +330,7 @@ function GameLog({ log }) {
   const toneFor = (text) => {
     if (/全壘打|再見|得 \d+ 分|擠回|突破僵局/.test(text)) return 'text-field-floodlight font-bold';
     if (/三振|雙殺|觸殺|超時|失敗/.test(text)) return 'text-red-200/90';
-    if (/投降|白旗/.test(text)) return 'text-sky-200/90';
+    if (/投降|白旗|平局|求和|握手/.test(text)) return 'text-sky-200/90';
     if (/安打|長打|二壘安打|三壘安打|盜.*成功/.test(text)) return 'text-emerald-200/90';
     return 'text-field-chalk/70';
   };
@@ -358,23 +358,24 @@ function GameLog({ log }) {
  * 中段向外橫移；曲球出手就是大弧線；指叉/變速前段完全像直球，末段
  * 才突然下墜。本地顯示的判定僅供即時回饋，正式結果以伺服器為準。
  */
-/* 橫拿球棒游標：棒頭（前端）＝手指拖曳點；甜蜜點（棒身上的球標）在
- * 棒頭內側約一顆球多的距離——所以理想擊球時，游標本身不會碰到球，
- * 是「棒身的甜蜜點」貼上球。tipLeftPct/tipTopPct 為棒頭位置。 */
-const BAT_PX = 128; // 球棒總長（px）
-const BAT_SWEET_PX = 30; // 甜蜜點距棒頭的距離（px）
+/* 橫拿球棒游標（仿真持棒）：手指拖曳點＝握把處（棒尾），棒身向左伸出；
+ * 甜蜜點（棒身上的球標）在棒頭內側——像真的握著棒尾揮棒一樣，
+ * 要用「離手最遠的甜蜜點」去掃到球，手（游標）本身離球遠得很。 */
+const BAT_GRIP_SVG_X = 108; // 握把（拖曳點）在 SVG 中的 x
+const BAT_SWEET_SVG_X = 34; // 甜蜜點在 SVG 中的 x
+const BAT_SWEET_FROM_GRIP_PX = BAT_GRIP_SVG_X - BAT_SWEET_SVG_X; // 甜蜜點在握把左方 74px
 
-function BatCursor({ tipLeftPct, tipTopPct }) {
+function BatCursor({ gripLeftPct, gripTopPct }) {
   return (
-    <div className="absolute pointer-events-none z-10" style={{ left: `${tipLeftPct}%`, top: `${tipTopPct}%` }}>
+    <div className="absolute pointer-events-none z-10" style={{ left: `${gripLeftPct}%`, top: `${gripTopPct}%` }}>
       <svg
-        width={BAT_PX}
+        width="128"
         height="30"
         viewBox="0 0 128 30"
         className="absolute drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]"
-        style={{ left: '-4px', top: '-15px' }}
+        style={{ left: `-${BAT_GRIP_SVG_X}px`, top: '-15px' }}
       >
-        {/* 棒身：左端棒頭（粗）→ 右端握把（細） */}
+        {/* 棒身：左端棒頭（粗）→ 右端握把（細，拖曳點） */}
         <path
           d="M4 6.5 Q-1 15 4 23.5 L58 20.5 L112 18 Q116 15 112 12 L58 9.5 Z"
           fill="#3ec6cf"
@@ -384,10 +385,12 @@ function BatCursor({ tipLeftPct, tipTopPct }) {
         />
         {/* 握把尾 */}
         <circle cx="116" cy="15" r="5.5" fill="#3ec6cf" stroke="#0e7c86" strokeWidth="2" />
-        {/* 甜蜜點球標：拿這裡去貼球 */}
-        <circle cx={BAT_SWEET_PX + 4} cy="15" r="7" fill="#fff" stroke="#d63b3b" strokeWidth="1.5" />
+        {/* 握把握點標記（手指所在） */}
+        <circle cx={BAT_GRIP_SVG_X} cy="15" r="3" fill="#0e7c86" opacity="0.9" />
+        {/* 甜蜜點球標：拿這裡去掃球 */}
+        <circle cx={BAT_SWEET_SVG_X} cy="15" r="7" fill="#fff" stroke="#d63b3b" strokeWidth="1.5" />
         <path
-          d={`M${BAT_SWEET_PX - 0.5} 10.5 Q${BAT_SWEET_PX + 4} 15 ${BAT_SWEET_PX - 0.5} 19.5 M${BAT_SWEET_PX + 8.5} 10.5 Q${BAT_SWEET_PX + 4} 15 ${BAT_SWEET_PX + 8.5} 19.5`}
+          d={`M${BAT_SWEET_SVG_X - 4.5} 10.5 Q${BAT_SWEET_SVG_X} 15 ${BAT_SWEET_SVG_X - 4.5} 19.5 M${BAT_SWEET_SVG_X + 4.5} 10.5 Q${BAT_SWEET_SVG_X} 15 ${BAT_SWEET_SVG_X + 4.5} 19.5`}
           stroke="#d63b3b"
           strokeWidth="1.3"
           fill="none"
@@ -401,12 +404,12 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
   const powerMode = mode === 'power';
   const [stage, setStage] = useState('windup'); // windup | flying | done
   const [ball, setBall] = useState(null); // {x,y,t}：位置＋縱深（t 越大＝越近、越大顆）
-  const [batTip, setBatTip] = useState({ x: 38, y: 62 }); // 棒頭（拖曳點）
+  const [batGrip, setBatGrip] = useState({ x: 78, y: 62 }); // 握把（拖曳點）
   const [held, setHeld] = useState(false);
   const [verdict, setVerdict] = useState(null);
   const boardRef = useRef(null);
   const doneRef = useRef(false);
-  const sweetRef = useRef({ x: 50, y: 62 }); // 甜蜜點（棒頭往握把方向偏移，實際判定點）
+  const sweetRef = useRef({ x: 50, y: 62 }); // 甜蜜點（握把左方一段棒身處，實際判定點）
   const trailRef = useRef([]); // 殘影：最近幾個球位置
   const rafRef = useRef(null);
   const graceRef = useRef(null);
@@ -483,20 +486,20 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
     const rect = el.getBoundingClientRect();
     const px = (clientX - rect.left) / rect.width;
     const py = (clientY - rect.top) / rect.height;
-    // 甜蜜點偏移量（棒頭→握把方向），由 px 換算成畫布單位，跟棒子圖示完全一致
-    const sweetOff = (BAT_SWEET_PX / rect.width) * CANVAS_SPAN;
-    const tip = {
+    // 甜蜜點在握把「左方」BAT_SWEET_FROM_GRIP_PX，由 px 換算成畫布單位，跟棒子圖示完全一致
+    const sweetOff = (BAT_SWEET_FROM_GRIP_PX / rect.width) * CANVAS_SPAN;
+    const grip = {
       x: clampCanvas(FIELD.canvasMin + px * CANVAS_SPAN),
       y: clampCanvas(FIELD.canvasMin + py * CANVAS_SPAN),
     };
-    return { tip, sweet: { x: clampCanvas(tip.x + sweetOff), y: tip.y } };
+    return { grip, sweet: { x: clampCanvas(grip.x - sweetOff), y: grip.y } };
   };
 
   const updateBat = (e) => {
     const pos = posFromPoint(e.clientX, e.clientY);
     if (pos) {
       sweetRef.current = pos.sweet;
-      setBatTip(pos.tip);
+      setBatGrip(pos.grip);
     }
   };
 
@@ -525,7 +528,7 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
   const ballSizePx = (t) => 9 + 19 * t * t;
   const arrived = ball && ball.t >= 1;
   const ballPct = ball ? { x: toBoardPct(ball.x), y: toBoardPct(ball.y) } : null;
-  const tipPct = { x: toBoardPct(batTip.x), y: toBoardPct(batTip.y) };
+  const gripPct = { x: toBoardPct(batGrip.x), y: toBoardPct(batGrip.y) };
   const sweetPct = { x: toBoardPct(sweetRef.current.x), y: toBoardPct(sweetRef.current.y) };
   const contactPct = (contactR / CANVAS_SPAN) * 100;
   const trail = trailRef.current.slice(0, -1);
@@ -537,10 +540,10 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
       </div>
       <div className="text-[11px] text-field-chalk/45 mb-4 text-center max-w-[300px]">
         {mode === 'bunt'
-          ? '把棒身上的球標貼到來球，輕輕放開＝出棒觸擊'
+          ? '手握棒尾，把棒頭球標貼到來球，輕輕放開＝出棒觸擊'
           : powerMode
             ? '⚡ 強力打擊：時機窗與甜蜜點都更小——但咬中就是大的'
-            : '球由遠而近逼近、越來越大顆；拿棒身上的球標貼球，進壘瞬間放開'}
+            : '手握棒尾、把棒頭的球標掃到來球——球由遠而近放大，進壘瞬間放開'}
       </div>
 
       <div
@@ -563,8 +566,8 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
           style={{ left: `${sweetPct.x}%`, top: `${sweetPct.y}%`, width: `${contactPct * 2}%`, height: `${contactPct * 2}%` }}
         />
 
-        {/* 橫拿球棒：棒頭跟著手指，甜蜜點在棒身內側 */}
-        <BatCursor tipLeftPct={tipPct.x} tipTopPct={tipPct.y} />
+        {/* 橫拿球棒（仿真持棒）：手握棒尾跟著手指，甜蜜點在棒頭內側 */}
+        <BatCursor gripLeftPct={gripPct.x} gripTopPct={gripPct.y} />
 
         {/* 球的殘影（讀軌跡與縱深用，不預告未來） */}
         {stage !== 'windup' && !arrived && trail.map((p, i) => (
@@ -603,11 +606,36 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
   );
 }
 
-/* ---------------- 彩蛋：投降輸一半 ----------------
- * 隱藏指令：連點三下「直球」（投手）或「打擊」（打者）按鈕觸發。
- * 發起後對方的大屏幕會播出經典畫面並選擇是否接受；
- * 接受＝發起方認輸、比賽立即結束——對啊！這裡流行投降輸一半！
+/* ---------------- 彩蛋：投降輸一半／氣不夠了平局 ----------------
+ * 隱藏指令（連點三下觸發）：
+ *   投降：「直球」（投手）或「打擊」（打者）——接受＝發起方認輸
+ *   平局：「指叉球」（投手）或「強力打擊」（打者）——接受＝握手言和
+ * 發起後對方的大屏幕會播出對應經典畫面並選擇是否接受。
  */
+const EGGS = {
+  surrender: {
+    img: '/surrender.png',
+    icon: '🏳️',
+    askTitle: '要向對方提出「投降輸一半」嗎？',
+    askDesc: '對方的大屏幕會播出你的投降請求；對方接受＝你直接認輸。',
+    yesBtn: '舉白旗！',
+    bigTitle: '🏳️ 對方請求：投降輸一半！',
+    bigDesc: '接受＝對方認輸、比賽立刻結束；不接受＝把白旗丟回去，繼續打。',
+    acceptBtn: '對啊！這裡流行投降輸一半',
+    declineBtn: '不接受，打完！',
+  },
+  draw: {
+    img: '/draw.png',
+    icon: '🤝',
+    askTitle: '氣不夠了……要向對方提出「平局」嗎？',
+    askDesc: '對方的大屏幕會播出你的求和請求；對方接受＝雙方握手言和、平局收場。',
+    yesBtn: '氣不夠了……求和！',
+    bigTitle: '🤝 對方喘著大氣：氣不夠了，是否平局？',
+    bigDesc: '接受＝雙方握手言和、比賽以平局結束；不接受＝繼續打到分出勝負。',
+    acceptBtn: '平局！就平局！',
+    declineBtn: '氣不夠了？繼續打！',
+  },
+};
 function useTripleTap(onTrigger) {
   const ref = useRef({ n: 0, t: 0 });
   return () => {
@@ -622,19 +650,21 @@ function useTripleTap(onTrigger) {
   };
 }
 
-function SurrenderConfirm({ onYes, onNo, busy }) {
+function SurrenderConfirm({ kind = 'surrender', onYes, onNo, busy }) {
+  const egg = EGGS[kind];
   return (
     <div className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-sm flex items-center justify-center px-6">
       <div className="max-w-sm w-full rounded-2xl border-2 border-field-floodlight/40 bg-field-night/95 p-6 text-center shadow-2xl">
-        <div className="text-3xl mb-2">🏳️</div>
+        <div className="text-3xl mb-2">{egg.icon}</div>
         <div className="font-display text-xl font-bold mb-1">觸發隱藏指令</div>
         <div className="text-sm text-field-chalk/70 mb-5 leading-relaxed">
-          要向對方提出「<span className="text-field-floodlight font-bold">投降輸一半</span>」嗎？<br />
-          對方的大屏幕會播出你的投降請求；對方接受＝你直接認輸。
+          {egg.askTitle}
+          <br />
+          {egg.askDesc}
         </div>
         <div className="flex gap-2 justify-center">
           <button disabled={busy} onClick={onYes} className="px-5 py-2 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30">
-            舉白旗！
+            {egg.yesBtn}
           </button>
           <button onClick={onNo} className="px-5 py-2 rounded-lg border border-field-chalk/30 text-field-chalk/80">
             當作沒按過
@@ -645,7 +675,8 @@ function SurrenderConfirm({ onYes, onNo, busy }) {
   );
 }
 
-function SurrenderBigScreen({ send, busy }) {
+function SurrenderBigScreen({ kind = 'surrender', send, busy }) {
+  const egg = EGGS[kind];
   return (
     <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex items-center justify-center px-4">
       <div className="max-w-md w-full rounded-2xl border-4 border-field-floodlight/60 bg-field-night/95 overflow-hidden shadow-2xl">
@@ -653,24 +684,24 @@ function SurrenderBigScreen({ send, busy }) {
           ── 球場大屏幕 ──
         </div>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/surrender.png" alt="這裡流行投降輸一半" className="w-full block" draggable={false} />
+        <img src={egg.img} alt={egg.bigTitle} className="w-full block" draggable={false} />
         <div className="p-5 text-center">
-          <div className="font-display text-xl font-bold mb-1">🏳️ 對方請求：投降輸一半！</div>
-          <div className="text-xs text-field-chalk/55 mb-4">接受＝對方認輸、比賽立刻結束；不接受＝把白旗丟回去，繼續打。</div>
+          <div className="font-display text-xl font-bold mb-1">{egg.bigTitle}</div>
+          <div className="text-xs text-field-chalk/55 mb-4">{egg.bigDesc}</div>
           <div className="flex gap-2 justify-center">
             <button
               disabled={busy}
               onClick={() => send('surrender_respond', { accept: true })}
               className="px-5 py-2 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30"
             >
-              對啊！這裡流行投降輸一半
+              {egg.acceptBtn}
             </button>
             <button
               disabled={busy}
               onClick={() => send('surrender_respond', { accept: false })}
               className="px-5 py-2 rounded-lg border border-red-400/50 text-red-300 font-bold disabled:opacity-30"
             >
-              不接受，打完！
+              {egg.declineBtn}
             </button>
           </div>
         </div>
@@ -684,7 +715,15 @@ function SurrenderBigScreen({ send, busy }) {
  * 在中央甜蜜點按下「揮棒」拿高分。分數 0~100 送回伺服器放大/縮小打擊結果權重。
  * 3.2 秒內沒出手＝完全沒跟上（低分自動送出）。
  */
-function SwingTimingGame({ stuff = 50, actionLabel = '揮棒！', onDone }) {
+/* ---------------- 出手時機（四區域制） ----------------
+ * 投手確認配球後彈出：光標在時機條上來回擺動（球威越高越快），按下「出手」定格。
+ * 四區域（與伺服器判定一致）：
+ *   ★完美（中央 |d|≤7 ，分數≥86）：指哪投哪，落點分毫不差
+ *   ○不錯（|d|≤21，分數≥58）：微幅偏移——瞄邊角可能剛好偏出帶外
+ *   △勉強（|d|≤36，分數≥28）：明顯偏移，邊角球風險大
+ *   ✕走鐘（其餘／超時）：失投——變成超慢的紅中小便球
+ */
+function SwingTimingGame({ stuff = 50, actionLabel = '出手！', onDone }) {
   const [pos, setPos] = useState(50);
   const [result, setResult] = useState(null); // { score, label, tone }
   const doneRef = useRef(false);
@@ -694,14 +733,14 @@ function SwingTimingGame({ stuff = 50, actionLabel = '揮棒！', onDone }) {
   // 隨機起始相位，避免背節奏
   const startRef = useRef(performance.now() - Math.random() * periodRef.current * 2);
 
-  const finish = useCallback((score, p) => {
+  const finish = useCallback((score) => {
     if (doneRef.current) return;
     doneRef.current = true;
     let label, tone;
-    if (score >= 90) { label = '完美！'; tone = 'text-field-floodlight'; }
-    else if (score >= 70) { label = '不錯！'; tone = 'text-emerald-300'; }
-    else if (score >= 40) { label = '普通'; tone = 'text-field-chalk/80'; }
-    else { label = p < 50 ? '太早了…' : '太晚了…'; tone = 'text-red-300'; }
+    if (score >= 86) { label = '★完美！指哪投哪'; tone = 'text-field-floodlight'; }
+    else if (score >= 58) { label = '○不錯！微偏'; tone = 'text-emerald-300'; }
+    else if (score >= 28) { label = '△勉強……會偏不少'; tone = 'text-yellow-300'; }
+    else { label = '✕走鐘——紅中小便球！'; tone = 'text-red-300'; }
     setResult({ score, label, tone });
     setTimeout(() => onDone(score), 700);
   }, [onDone]);
@@ -711,8 +750,8 @@ function SwingTimingGame({ stuff = 50, actionLabel = '揮棒！', onDone }) {
     const period = periodRef.current;
     const loop = (now) => {
       if (doneRef.current) return;
-      if (now - startRef.current > 3200 + Math.random() * 0) {
-        finish(8, posRef.current); // 站著沒出手＝完全沒跟上
+      if (now - startRef.current > 3200) {
+        finish(8); // 站著沒出手＝走鐘（小便球）
         return;
       }
       const t = (now - startRef.current) % (period * 2);
@@ -727,26 +766,29 @@ function SwingTimingGame({ stuff = 50, actionLabel = '揮棒！', onDone }) {
 
   const swing = () => {
     const p = posRef.current;
-    finish(Math.max(0, Math.round(100 - Math.abs(p - 50) * 2)), p);
+    finish(Math.max(0, Math.round(100 - Math.abs(p - 50) * 2)));
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center px-6 select-none">
-      <div className="text-field-chalk/70 text-sm mb-1">球來了——看準時機！</div>
-      <div className="text-[11px] text-field-chalk/40 mb-5">光標越靠近中央甜蜜點，擊球品質越好（對方球威越強，擺動越快）</div>
+      <div className="text-field-chalk/70 text-sm mb-1">出手時機——決定這球去哪！</div>
+      <div className="text-[11px] text-field-chalk/40 mb-5 text-center max-w-[340px]">
+        ★完美＝指哪投哪｜○不錯＝微偏（邊角可能滑出帶外）｜△勉強＝大偏｜✕走鐘＝超慢紅中小便球
+      </div>
 
-      {/* 時機條 */}
+      {/* 時機條：四區域（走鐘/勉強/不錯/★完美/不錯/勉強/走鐘） */}
       <div className="relative w-full max-w-sm h-12 rounded-xl bg-black/70 border border-field-chalk/25 overflow-hidden">
-        {/* 分區底色：紅（沒跟上）→ 黃（普通）→ 綠（甜蜜點） */}
         <div className="absolute inset-0 flex">
-          <div className="bg-red-900/60" style={{ width: '30%' }} />
-          <div className="bg-yellow-700/50" style={{ width: '12.5%' }} />
-          <div className="bg-emerald-600/60" style={{ width: '15%' }} />
-          <div className="bg-yellow-700/50" style={{ width: '12.5%' }} />
-          <div className="bg-red-900/60" style={{ width: '30%' }} />
+          <div className="bg-red-900/65" style={{ width: '14%' }} />
+          <div className="bg-yellow-700/50" style={{ width: '15%' }} />
+          <div className="bg-emerald-700/55" style={{ width: '14%' }} />
+          <div className="bg-field-floodlight/45" style={{ width: '14%' }} />
+          <div className="bg-emerald-700/55" style={{ width: '14%' }} />
+          <div className="bg-yellow-700/50" style={{ width: '15%' }} />
+          <div className="bg-red-900/65" style={{ width: '14%' }} />
         </div>
-        {/* 甜蜜點中線 */}
-        <div className="absolute top-0 bottom-0 left-1/2 w-[2px] -translate-x-1/2 bg-field-floodlight/80" />
+        {/* 完美區中線 */}
+        <div className="absolute top-0 bottom-0 left-1/2 w-[2px] -translate-x-1/2 bg-white/90" />
         {/* 光標 */}
         <div
           className="absolute top-0 bottom-0 w-[5px] -ml-[2.5px] bg-white rounded shadow-[0_0_10px_rgba(255,255,255,0.9)]"
@@ -776,10 +818,10 @@ function InfoTip({ type }) {
     pitcher: [
       'S/A 是拿手球路：更不容易失投、位移也更急更快。B/C 陌生球路容易被咬中，疲勞還會讓全部等級下修。',
       '球可拖到帶內任意位置、甚至帶外。每種球路的軌跡不同：直球最快最直、滑球外竄、曲球大弧線、指叉/變速末段下墜。',
-      '出手時機條太差＝失投紅中。壘上有人時可牽制——若對方剛好下了盜壘暗號，大概率直接抓死。',
+      '出手時機四區域：★完美＝指哪投哪、○不錯＝微偏（邊角可能滑出帶外）、△勉強＝大偏、✕走鐘＝超慢的紅中小便球。壘上有人時可牽制——若對方剛好下了盜壘暗號，大概率直接抓死。',
     ],
     batter: [
-      '按住畫面＝持棒瞄準（棒身上的球標＝甜蜜點），放開的一瞬間＝揮棒。時機與位置都對才算咬中。',
+      '按住畫面＝手握棒尾持棒（拖曳點在握把），棒頭的球標＝甜蜜點；放開的一瞬間＝揮棒，時機與位置都對才算咬中。',
       '直球一閃而逝、時機窗最窄；滑球中段外竄、曲球大弧線好認；指叉/變速前段完全像直球、末段才下墜——盯到最後再出手。',
       '切到球的上緣偏滾地、下緣偏飛球。強力打擊咬中就是大的但更難；壞球區的球別追。',
     ],
@@ -954,8 +996,9 @@ function Lobby({ onEnter, error }) {
 /* ---------------- 投手回合 ---------------- */
 
 function PitcherScreen({ view, send, busy }) {
-  const [askSurrender, setAskSurrender] = useState(false);
-  const tapSurrender = useTripleTap(() => setAskSurrender(true));
+  const [askEgg, setAskEgg] = useState(null); // null | 'surrender' | 'draw'
+  const tapSurrender = useTripleTap(() => setAskEgg('surrender'));
+  const tapDraw = useTripleTap(() => setAskEgg('draw'));
   const g = view.game;
   const [typeId, setTypeId] = useState('fastball');
   const [target, setTarget] = useState(null); // {x,y} 連續座標 | null
@@ -991,11 +1034,12 @@ function PitcherScreen({ view, send, busy }) {
       <Scoreboard g={g} />
       <InfoTip type="pitcher" />
 
-      {askSurrender && (
+      {askEgg && (
         <SurrenderConfirm
+          kind={askEgg}
           busy={busy}
-          onYes={() => { setAskSurrender(false); send('surrender_offer'); }}
-          onNo={() => setAskSurrender(false)}
+          onYes={() => { const k = askEgg; setAskEgg(null); send('surrender_offer', { kind: k }); }}
+          onNo={() => setAskEgg(null)}
         />
       )}
 
@@ -1046,7 +1090,8 @@ function PitcherScreen({ view, send, busy }) {
           selected={typeId}
           onSelect={(id) => {
             setTypeId(id);
-            if (id === 'fastball') tapSurrender(); // 彩蛋：連點三下直球
+            if (id === 'fastball') tapSurrender(); // 彩蛋：連點三下直球＝投降
+            if (id === 'fork') tapDraw(); // 彩蛋：連點三下指叉球＝求平局
           }}
           pitcher={pitcher}
         />
@@ -1138,8 +1183,9 @@ const BATTER_MODES = [
 ];
 
 function BatterScreen({ view, send, busy }) {
-  const [askSurrender, setAskSurrender] = useState(false);
-  const tapSurrender = useTripleTap(() => setAskSurrender(true));
+  const [askEgg, setAskEgg] = useState(null); // null | 'surrender' | 'draw'
+  const tapSurrender = useTripleTap(() => setAskEgg('surrender'));
+  const tapDraw = useTripleTap(() => setAskEgg('draw'));
   const g = view.game;
   const [mode, setMode] = useState('normal');
   const [reacting, setReacting] = useState(false); // 即時反應小遊戲進行中
@@ -1238,7 +1284,8 @@ function BatterScreen({ view, send, busy }) {
               key={m.id}
               onClick={() => {
                 setMode(m.id);
-                if (m.id === 'normal') tapSurrender(); // 彩蛋：連點三下打擊
+                if (m.id === 'normal') tapSurrender(); // 彩蛋：連點三下打擊＝投降
+                if (m.id === 'power') tapDraw(); // 彩蛋：連點三下強力打擊＝求平局
               }}
               className={`rounded-lg border px-3 py-2 text-left ${
                 mode === m.id ? 'bg-field-floodlight text-field-night border-field-floodlight' : 'border-field-chalk/25'
@@ -1271,11 +1318,12 @@ function BatterScreen({ view, send, busy }) {
 
       <InfoTip type="batter" />
 
-      {askSurrender && (
+      {askEgg && (
         <SurrenderConfirm
+          kind={askEgg}
           busy={busy}
-          onYes={() => { setAskSurrender(false); send('surrender_offer'); }}
-          onNo={() => setAskSurrender(false)}
+          onYes={() => { const k = askEgg; setAskEgg(null); send('surrender_offer', { kind: k }); }}
+          onNo={() => setAskEgg(null)}
         />
       )}
 
@@ -1386,8 +1434,11 @@ function pitchChoiceText(choice) {
   const type = t?.name || choice.typeId || '—';
   const gradeTxt = choice.grade ? `【${choice.grade}】` : '';
   const zone = choice.targetX != null && choice.targetY != null ? zoneLabelFromXY(choice.targetX, choice.targetY) : '—';
-  const rel = choice.release != null
-    ? choice.release < 22 ? '・出手失手！' : choice.release >= 80 ? '・出手完美' : ''
+  const ZONE_TXT = { perfect: '・出手★完美', good: '・出手○不錯', poor: '・出手△勉強', worst: '・出手✕走鐘（小便球）' };
+  const rel = choice.releaseZone
+    ? ZONE_TXT[choice.releaseZone] || ''
+    : choice.release != null
+      ? choice.release < 28 ? '・出手✕走鐘' : choice.release >= 86 ? '・出手★完美' : ''
     : '';
   return `${gradeTxt}${type}・${zone}${rel}`;
 }
@@ -1624,7 +1675,12 @@ function GameOverScreen({ view, onLeave }) {
       {g.surrender?.status === 'accepted' && (
         <div className="max-w-sm mx-auto mb-6 rounded-xl overflow-hidden border-2 border-field-floodlight/40">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/surrender.png" alt="這裡流行投降輸一半" className="w-full block" draggable={false} />
+          <img
+            src={(EGGS[g.surrender.kind] || EGGS.surrender).img}
+            alt={g.endReason}
+            className="w-full block"
+            draggable={false}
+          />
         </div>
       )}
       <div className="flex items-center justify-center gap-6 mb-6">
@@ -1787,10 +1843,10 @@ export default function Game() {
       {view?.game?.surrender?.status === 'pending' && view.game.phase !== 'gameover' && (
         view.game.surrender.by === view.role ? (
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-black/80 border border-field-floodlight/40 text-field-floodlight text-sm font-bold animate-pulse">
-            🏳️ 投降請求已送上大屏幕，等待對方回應…
+            {view.game.surrender.kind === 'draw' ? '🤝 求和請求已送上大屏幕，等待對方回應…' : '🏳️ 投降請求已送上大屏幕，等待對方回應…'}
           </div>
         ) : (
-          <SurrenderBigScreen send={send} busy={busy} />
+          <SurrenderBigScreen kind={view.game.surrender.kind || 'surrender'} send={send} busy={busy} />
         )
       )}
 

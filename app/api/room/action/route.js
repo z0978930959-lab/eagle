@@ -1,3 +1,4 @@
+import { actBingoChoose, actBingoRps, actBingoMark, bingoViewFor } from '../../../../lib/bingoLogic';
 import { NextResponse } from 'next/server';
 import {
   viewFor,
@@ -45,6 +46,32 @@ export async function POST(req) {
       if (!room) return NextResponse.json({ error: 'NOT_FOUND', message: '房間不存在或已過期' }, { status: 404 });
       const role = roleOf(room, token);
       if (!role) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 });
+      // 賓果房：獨立的動作分派（無超時機制，輪到誰就等誰）
+      if (room.type === 'bingo') {
+        if (!room.bingo.players.home) return NextResponse.json({ error: 'NOT_STARTED', message: '對手尚未加入' }, { status: 409 });
+        try {
+          switch (action) {
+            case 'bingo_choose':
+              actBingoChoose(room, role, payload);
+              break;
+            case 'bingo_rps':
+              actBingoRps(room, role, payload);
+              break;
+            case 'bingo_mark':
+              actBingoMark(room, role, payload);
+              break;
+            default:
+              return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
+          }
+        } catch (e) {
+          // BOARD_CLASH 會重抽選項（房間有變動），錯誤路徑也要先存檔再回應
+          await guardedSetRoom(code, room);
+          return NextResponse.json({ error: safeErrorCode(e), view: bingoViewFor(room, role) }, { status: 409 });
+        }
+        await guardedSetRoom(code, room);
+        return NextResponse.json({ view: bingoViewFor(room, role) });
+      }
+
       if (!room.game) return NextResponse.json({ error: 'NOT_STARTED', message: '對手尚未加入' }, { status: 409 });
 
       // 先做超時判定：若該階段已超時被自動處理，晚到的操作會落入 WRONG_PHASE 由前端刷新
@@ -68,7 +95,7 @@ export async function POST(req) {
             actReadyNext(room, role);
             break;
           case 'surrender_offer':
-            actSurrenderOffer(room, role);
+            actSurrenderOffer(room, role, payload);
             break;
           case 'surrender_respond':
             actSurrenderRespond(room, role, payload);

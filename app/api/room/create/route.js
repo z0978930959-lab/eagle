@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createRoom, viewFor } from '../../../../lib/gameLogic';
+import { createBingoRoom, bingoViewFor } from '../../../../lib/bingoLogic';
 import { createRoomIfAbsent, storeReady, rateLimit } from '../../../../lib/store';
 import { safeErrorCode, errorResponseInfo } from '../../../../lib/apiError';
 import { clientIp } from '../../../../lib/clientIp';
@@ -35,8 +36,9 @@ export async function POST(req) {
   } catch {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
-  const { innings, teamId, extraMode } = body || {};
-  if (![1, 3].includes(innings) || typeof teamId !== 'string' || (extraMode && !['cpbl', 'tiebreak'].includes(extraMode))) {
+  const { innings, teamId, extraMode, mode } = body || {};
+  const isBingo = mode === 'bingo';
+  if (!isBingo && (![1, 3].includes(innings) || typeof teamId !== 'string' || (extraMode && !['cpbl', 'tiebreak'].includes(extraMode)))) {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
 
@@ -44,14 +46,18 @@ export async function POST(req) {
     const code = genCode();
     let room;
     try {
-      room = createRoom({ code, innings, awayTeamId: teamId, extraMode });
+      room = isBingo ? createBingoRoom({ code }) : createRoom({ code, innings, awayTeamId: teamId, extraMode });
     } catch (e) {
       return NextResponse.json({ error: safeErrorCode(e) }, { status: 400 });
     }
 
     try {
       if (await createRoomIfAbsent(code, room)) {
-        return NextResponse.json({ code, token: room.tokens.away, view: viewFor(room, 'away') });
+        return NextResponse.json({
+          code,
+          token: room.tokens.away,
+          view: isBingo ? bingoViewFor(room, 'away') : viewFor(room, 'away'),
+        });
       }
     } catch (e) {
       const info = errorResponseInfo(e);

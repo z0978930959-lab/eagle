@@ -1,5 +1,5 @@
-import Game from '../components/Game';
+import Home from '../components/Home';
 
 export default function Page() {
-  return <Game />;
+  return <Home />;
 }
