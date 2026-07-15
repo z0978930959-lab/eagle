@@ -7,7 +7,8 @@ import {
   actChangePitcher,
   actPinchHit,
   actReadyNext,
-  actChallenge,
+  actSurrenderOffer,
+  actSurrenderRespond,
   actPickoff,
   actDeclareSteal,
   enforceTimeouts,
@@ -66,8 +67,11 @@ export async function POST(req) {
           case 'ready_next':
             actReadyNext(room, role);
             break;
-          case 'challenge':
-            actChallenge(room, role);
+          case 'surrender_offer':
+            actSurrenderOffer(room, role);
+            break;
+          case 'surrender_respond':
+            actSurrenderRespond(room, role, payload);
             break;
           case 'pickoff':
             actPickoff(room, role);
