@@ -36,7 +36,7 @@ export async function POST(req) {
   } catch {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
-  const { innings, teamId, extraMode, mode } = body || {};
+  const { innings, teamId, extraMode, mode, reveal, cor } = body || {};
   const isBingo = mode === 'bingo';
   if (!isBingo && (![1, 3].includes(innings) || typeof teamId !== 'string' || (extraMode && !['cpbl', 'tiebreak'].includes(extraMode)))) {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
@@ -46,7 +46,7 @@ export async function POST(req) {
     const code = genCode();
     let room;
     try {
-      room = isBingo ? createBingoRoom({ code }) : createRoom({ code, innings, awayTeamId: teamId, extraMode });
+      room = isBingo ? createBingoRoom({ code, reveal: !!reveal }) : createRoom({ code, innings, awayTeamId: teamId, extraMode, cor });
     } catch (e) {
       return NextResponse.json({ error: safeErrorCode(e) }, { status: 400 });
     }

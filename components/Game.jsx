@@ -407,6 +407,7 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
   const [batGrip, setBatGrip] = useState({ x: 78, y: 62 }); // 握把（拖曳點）
   const [held, setHeld] = useState(false);
   const [verdict, setVerdict] = useState(null);
+  const [countdown, setCountdown] = useState(null); // 3/2/1/0 → GO！倒數提示
   const boardRef = useRef(null);
   const doneRef = useRef(false);
   const sweetRef = useRef({ x: 50, y: 62 }); // 甜蜜點（握把左方一段棒身處，實際判定點）
@@ -451,7 +452,15 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
   };
 
   useEffect(() => {
-    const windupMs = 600 + Math.random() * 700;
+    const windupMs = 1500 + Math.random() * 800; // 拉長醞釀期，並在畫面上倒數 3-2-1
+    let countdownTimers = [];
+    const countdownSetters = [3, 2, 1].map((n, i) => {
+      const t = setTimeout(() => setCountdown(n), windupMs - (3 - i) * 450);
+      countdownTimers.push(t);
+      return t;
+    });
+    countdownTimers.push(setTimeout(() => setCountdown(0), windupMs));
+
     const windupTimer = setTimeout(() => {
       stageRef.current = 'flying';
       setStage('flying');
@@ -474,6 +483,7 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
     }, windupMs);
     return () => {
       clearTimeout(windupTimer);
+      countdownTimers.forEach(clearTimeout);
       if (graceRef.current) clearTimeout(graceRef.current);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
@@ -546,6 +556,22 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
             : '手握棒尾、把棒頭的球標掃到來球——球由遠而近放大，進壘瞬間放開'}
       </div>
 
+      {/* 打擊反應倒數：3 → 2 → 1 → GO！讓玩家有時間就位、能預期出手時刻 */}
+      {stage === 'windup' && countdown != null && (
+        <div className="mb-2 h-16 flex items-center justify-center pointer-events-none">
+          <div
+            key={countdown}
+            className={`font-display font-black tabular-nums transition-all animate-pulse ${
+              countdown === 0
+                ? 'text-6xl text-field-floodlight drop-shadow-[0_0_20px_rgba(255,200,60,0.6)]'
+                : 'text-5xl text-field-chalk/80'
+            }`}
+          >
+            {countdown === 0 ? 'GO！' : countdown}
+          </div>
+        </div>
+      )}
+
       <div
         ref={boardRef}
         onPointerDown={onDown}
@@ -606,12 +632,132 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
   );
 }
 
+/* 三秒黑幕梗圖橫幅：用在彩蛋與拒絕投降/平手時的即時反饋 */
+function MemeFlash({ img, title, sub }) {
+  return (
+    <div className="fixed inset-0 z-[68] bg-black/85 backdrop-blur-sm flex items-center justify-center px-4 pointer-events-none">
+      <div className="max-w-sm w-full rounded-2xl border-4 border-field-floodlight/60 bg-field-night/95 overflow-hidden shadow-2xl">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={img} alt={title} className="w-full block" draggable={false} />
+        <div className="p-3 text-center">
+          <div className="font-display text-lg font-bold">{title}</div>
+          {sub && <div className="text-[11px] text-field-chalk/55 mt-1">{sub}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- 挑釁系統 ----------------
+ * 「😤 挑釁」按鈕：第 1~4 次各對應一張梗圖（之後重複第 4 張），對方大屏幕播出。
+ * 每次挑釁 40% 觸發主審警告（播裁判圖）；同一方累計兩次警告＝總教練驅逐
+ * （播驅逐圖），之後無法下達盜壘、代打、佈陣（換投、牽制不受影響）。
+ */
+const TAUNT_IMGS = ['/taunt1.png', '/taunt2.png', '/taunt3.png', '/taunt4.png'];
+
+function TauntSystem({ view, send, busy }) {
+  const g = view?.game;
+  const [show, setShow] = useState(null); // { img, title, sub }
+  const seenRef = useRef(-1);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    const feed = g?.tauntFeed;
+    if (seenRef.current === -1) {
+      seenRef.current = feed?.seq || 0; // 首次同步：既有事件視為已看過（重整不重播）
+      return;
+    }
+    if (!feed || feed.seq <= seenRef.current) return;
+    seenRef.current = feed.seq;
+
+    const queue = [];
+    if (feed.by !== view.role) {
+      queue.push({ img: TAUNT_IMGS[(feed.stage || 1) - 1], title: '😤 對方挑釁！', sub: null });
+    }
+    if (feed.warned && !feed.ejected) {
+      queue.push({
+        img: '/warn.png',
+        title: '🟨 主審警告！',
+        sub: feed.by === view.role ? '你的板凳吃下警告（累計兩次＝總教練驅逐）' : '對方板凳吃下警告',
+      });
+    }
+    if (feed.ejected) {
+      queue.push({
+        img: '/eject.png',
+        title: '🟥 總教練驅逐出場！',
+        sub: feed.by === view.role ? '你本場無法再下達：盜壘、代打、佈陣' : '對方本場無法再下達：盜壘、代打、佈陣',
+      });
+    }
+    if (!queue.length) return;
+    let i = 0;
+    const playNext = () => {
+      if (i >= queue.length) {
+        setShow(null);
+        return;
+      }
+      setShow(queue[i]);
+      i += 1;
+      timerRef.current = setTimeout(playNext, 2800);
+    };
+    playNext();
+    return () => clearTimeout(timerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [g?.tauntFeed?.seq]);
+
+  if (!g || g.phase === 'gameover') return null;
+  const my = g.myTaunt;
+
+  return (
+    <>
+      <button
+        disabled={busy}
+        onClick={() => send('taunt')}
+        title="挑釁對方（40% 機率吃裁判警告，兩次警告總教練驅逐）"
+        className="fixed bottom-4 right-4 z-40 px-3 py-2 rounded-full bg-black/60 border border-field-chalk/30 text-sm hover:border-field-floodlight hover:text-field-floodlight disabled:opacity-40"
+      >
+        😤 挑釁
+      </button>
+
+      {my?.ejected && (
+        <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-red-900/70 border border-red-400/50 text-red-200 text-xs font-bold">
+          🟥 總教練已被驅逐（禁：盜壘/代打/佈陣）
+        </div>
+      )}
+      {!my?.ejected && my?.warnings > 0 && (
+        <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-yellow-900/60 border border-yellow-400/40 text-yellow-200 text-xs font-bold">
+          🟨 板凳警告 {my.warnings}/2
+        </div>
+      )}
+
+      {show && (
+        <div className="fixed inset-0 z-[65] bg-black/85 backdrop-blur-sm flex items-center justify-center px-4" onClick={() => setShow(null)}>
+          <div className="max-w-md w-full rounded-2xl border-4 border-field-floodlight/60 bg-field-night/95 overflow-hidden shadow-2xl">
+            <div className="bg-field-floodlight/15 px-4 py-2 text-center text-xs tracking-[0.3em] text-field-floodlight font-bold">
+              ── 球場大屏幕 ──
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={show.img} alt={show.title} className="w-full block" draggable={false} />
+            <div className="p-4 text-center">
+              <div className="font-display text-xl font-bold">{show.title}</div>
+              {show.sub && <div className="text-xs text-field-chalk/55 mt-1">{show.sub}</div>}
+              <div className="text-[10px] text-field-chalk/35 mt-2">（點擊任意處關閉）</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ---------------- 彩蛋：投降輸一半／氣不夠了平局 ----------------
  * 隱藏指令（連點三下觸發）：
  *   投降：「直球」（投手）或「打擊」（打者）——接受＝發起方認輸
  *   平局：「指叉球」（投手）或「強力打擊」（打者）——接受＝握手言和
  * 發起後對方的大屏幕會播出對應經典畫面並選擇是否接受。
  */
+const REJECT_IMG = '/notthateasy.png'; // 拒絕投降/平手 → 三秒橫幅
+const BETRAY_IMG = '/betray.png'; // 變速球三連點 → 三秒橫幅
+
 const EGGS = {
   surrender: {
     img: '/surrender.png',
@@ -955,6 +1101,23 @@ function Lobby({ onEnter, error }) {
               </button>
             ))}
           </div>
+          <div className="text-sm mb-2 mt-4 text-field-chalk/70">
+            彈力係數 <span className="font-mono-tc text-field-floodlight font-bold">{cor.toFixed(1)}</span>
+          </div>
+          <input
+            type="range"
+            min="0.5"
+            max="1.5"
+            step="0.1"
+            value={cor}
+            onChange={(e) => setCor(Number(e.target.value))}
+            className="w-full accent-field-floodlight"
+          />
+          <div className="flex justify-between text-[10px] text-field-chalk/40 mt-0.5">
+            <span>0.5 死球（投手戰）</span>
+            <span>1.0 標準</span>
+            <span>1.5 彈力球（打擊戰）</span>
+          </div>
         </div>
       )}
 
@@ -999,6 +1162,11 @@ function PitcherScreen({ view, send, busy }) {
   const [askEgg, setAskEgg] = useState(null); // null | 'surrender' | 'draw'
   const tapSurrender = useTripleTap(() => setAskEgg('surrender'));
   const tapDraw = useTripleTap(() => setAskEgg('draw'));
+  const [betrayShow, setBetrayShow] = useState(false);
+  const tapBetray = useTripleTap(() => {
+    setBetrayShow(true);
+    setTimeout(() => setBetrayShow(false), 3000);
+  });
   const g = view.game;
   const [typeId, setTypeId] = useState('fastball');
   const [target, setTarget] = useState(null); // {x,y} 連續座標 | null
@@ -1042,6 +1210,7 @@ function PitcherScreen({ view, send, busy }) {
           onNo={() => setAskEgg(null)}
         />
       )}
+      {betrayShow && <MemeFlash img={BETRAY_IMG} title="😡 你這混蛋，你敢陰我！" />}
 
       <div className="mt-4 flex justify-center">
         <button
@@ -1092,6 +1261,7 @@ function PitcherScreen({ view, send, busy }) {
             setTypeId(id);
             if (id === 'fastball') tapSurrender(); // 彩蛋：連點三下直球＝投降
             if (id === 'fork') tapDraw(); // 彩蛋：連點三下指叉球＝求平局
+            if (id === 'change') tapBetray(); // 彩蛋：連點三下變速球＝你這混蛋你敢陰我
           }}
           pitcher={pitcher}
         />
@@ -1115,7 +1285,9 @@ function PitcherScreen({ view, send, busy }) {
             <button
               key={sh.id}
               onClick={() => setShift(sh.id)}
-              className={`px-3 py-1.5 rounded-full text-sm border ${shift === sh.id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
+              disabled={g.myTaunt?.ejected}
+              title={g.myTaunt?.ejected ? '總教練已被驅逐，佈陣固定為一般站位' : undefined}
+              className={`px-3 py-1.5 rounded-full text-sm border disabled:opacity-30 ${shift === sh.id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
             >
               {sh.name}
             </button>
@@ -1127,6 +1299,34 @@ function PitcherScreen({ view, send, busy }) {
       </div>
 
       <div className="mt-6 flex flex-col items-center gap-2">
+        {/* Pitch Out：故意投遠側壞球抓盜壘/強迫取分（暗號，對方看不到） */}
+        {(g.bases.first || g.bases.second || g.bases.third) && (
+          <div className="w-full max-w-[280px] rounded-xl border border-field-chalk/15 bg-black/25 px-3 py-2.5">
+            <div className="text-[11px] text-field-chalk/60 mb-1 font-bold">🎯 Pitch Out（暗號，對方看不到）</div>
+            <div className="text-[10px] text-field-chalk/45 mb-2 leading-relaxed">
+              故意投外角壞球，賭對方偷跑——高外角抓盜壘 50%、低外角 20%；抓強迫取分 90%
+            </div>
+            <div className="flex gap-1.5">
+              {[
+                ['high', '⬆ 高外角', 'bg-red-500/20 border-red-400/60 text-red-200'],
+                ['low', '⬇ 低外角', 'bg-yellow-500/15 border-yellow-400/50 text-yellow-200'],
+              ].map(([h, label, cls]) => {
+                const on = g.pendingPitchOut?.height === h;
+                return (
+                  <button
+                    key={h}
+                    disabled={busy}
+                    onClick={() => send('declare_pitchout', on ? { cancel: true } : { height: h })}
+                    className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-bold border ${on ? cls + ' ring-2 ring-current' : 'border-field-chalk/25 text-field-chalk/70'}`}
+                  >
+                    {on ? '✅ ' : ''}{label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <button
           disabled={!target || busy}
           onClick={() => setReleasing(true)}
@@ -1186,6 +1386,11 @@ function BatterScreen({ view, send, busy }) {
   const [askEgg, setAskEgg] = useState(null); // null | 'surrender' | 'draw'
   const tapSurrender = useTripleTap(() => setAskEgg('surrender'));
   const tapDraw = useTripleTap(() => setAskEgg('draw'));
+  const [betrayShow, setBetrayShow] = useState(false);
+  const tapBetray = useTripleTap(() => {
+    setBetrayShow(true);
+    setTimeout(() => setBetrayShow(false), 3000);
+  });
   const g = view.game;
   const [mode, setMode] = useState('normal');
   const [reacting, setReacting] = useState(false); // 即時反應小遊戲進行中
@@ -1226,7 +1431,8 @@ function BatterScreen({ view, send, busy }) {
           </div>
           <button
             onClick={() => setShowBench(!showBench)}
-            disabled={availableBench.length === 0}
+            disabled={availableBench.length === 0 || g.myTaunt?.ejected}
+            title={g.myTaunt?.ejected ? '總教練已被驅逐，無法代打' : undefined}
             className="mt-1.5 text-[11px] border border-field-chalk/25 rounded-full px-2.5 py-0.5 disabled:opacity-30"
           >
             代打（剩 {availableBench.length}）
@@ -1254,6 +1460,11 @@ function BatterScreen({ view, send, busy }) {
           🏃 跑者已啟動盜壘（{g.pendingSteal.base === 'double' ? '雙盜壘！' : g.pendingSteal.base === 'first' ? '一壘→二壘' : '二壘→三壘'}）
         </div>
       )}
+      {g.pendingSqueeze && (
+        <div className="mt-2 text-center text-xs text-field-floodlight font-bold animate-pulse">
+          🏃 三壘跑者已下強迫取分暗號——出手瞬間衝本壘！打者必須把球擊出去，否則跑者被抓死
+        </div>
+      )}
       {showBench && (
         <div className="mt-2 flex flex-col gap-1.5 max-w-[320px] mx-auto">
           {side.bench.map((b, i) => (
@@ -1279,22 +1490,36 @@ function BatterScreen({ view, send, busy }) {
       <div className="mt-5">
         <div className="text-sm mb-2 text-field-chalk/70 text-center">打擊策略</div>
         <div className="grid grid-cols-2 gap-2 max-w-sm mx-auto">
-          {BATTER_MODES.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => {
-                setMode(m.id);
-                if (m.id === 'normal') tapSurrender(); // 彩蛋：連點三下打擊＝投降
-                if (m.id === 'power') tapDraw(); // 彩蛋：連點三下強力打擊＝求平局
-              }}
-              className={`rounded-lg border px-3 py-2 text-left ${
-                mode === m.id ? 'bg-field-floodlight text-field-night border-field-floodlight' : 'border-field-chalk/25'
-              }`}
-            >
-              <div className={`text-sm font-bold ${mode === m.id ? '' : 'text-field-chalk/90'}`}>{m.name}</div>
-              <div className={`text-[10px] leading-snug mt-0.5 ${mode === m.id ? 'text-field-night/70' : 'text-field-chalk/45'}`}>{m.desc}</div>
-            </button>
-          ))}
+          {BATTER_MODES.map((m) => {
+            const noRunner = !g.bases.first && !g.bases.second && !g.bases.third;
+            const squeezeOn = !!g.pendingSqueeze;
+            const disabled = (m.id === 'bunt' && noRunner) || (m.id === 'power' && squeezeOn); // 無跑者不可觸擊；強迫取分不可強力打擊
+            return (
+              <button
+                key={m.id}
+                disabled={disabled}
+                title={
+                  m.id === 'bunt' && noRunner ? '沒人在壘不可觸擊'
+                  : m.id === 'power' && squeezeOn ? '強迫取分不可搭配強力打擊（本意是犧牲，強力打擊風險過高）'
+                  : undefined
+                }
+                onClick={() => {
+                  setMode(m.id);
+                  if (m.id === 'normal') tapSurrender(); // 彩蛋：連點三下打擊＝投降
+                  if (m.id === 'power') tapDraw(); // 彩蛋：連點三下強力打擊＝求平局
+                }}
+                className={`rounded-lg border px-3 py-2 text-left disabled:opacity-30 disabled:cursor-not-allowed ${
+                  mode === m.id ? 'bg-field-floodlight text-field-night border-field-floodlight' : 'border-field-chalk/25'
+                }`}
+              >
+                <div className={`text-sm font-bold ${mode === m.id ? '' : 'text-field-chalk/90'}`}>
+                  {m.name}
+                  {disabled && <span className="text-[10px] font-normal text-red-300 ml-1">（無跑者）</span>}
+                </div>
+                <div className={`text-[10px] leading-snug mt-0.5 ${mode === m.id ? 'text-field-night/70' : 'text-field-chalk/45'}`}>{m.desc}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1302,7 +1527,10 @@ function BatterScreen({ view, send, busy }) {
         <button
           disabled={busy}
           onClick={() => {
-            if (mode === 'take') submit({ batX: null, batY: null, swingDelta: null });
+            if (mode === 'take') {
+              if (g.pendingSqueeze && !window.confirm('已下強迫取分暗號——選擇「不打擊」跑者一定被抓死本壘！確定要目送這一球？')) return;
+              submit({ batX: null, batY: null, swingDelta: null });
+            }
             else setReacting(true);
           }}
           className="px-8 py-2.5 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30"
@@ -1326,6 +1554,7 @@ function BatterScreen({ view, send, busy }) {
           onNo={() => setAskEgg(null)}
         />
       )}
+      {betrayShow && <MemeFlash img={BETRAY_IMG} title="😡 你這混蛋，你敢陰我！" />}
 
       {reacting && path && (
         <BatAimGame
@@ -1381,7 +1610,8 @@ function OffenseWaitScreen({ view, send, busy }) {
               return (
                 <button
                   key={b}
-                  disabled={busy}
+                  disabled={busy || g.myTaunt?.ejected}
+                  title={g.myTaunt?.ejected ? '總教練已被驅逐，無法下盜壘暗號' : undefined}
                   onClick={() => send('declare_steal', { base: on ? null : b })}
                   className={`rounded-lg px-3 py-2.5 text-left border transition ${on
                     ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold'
@@ -1395,6 +1625,35 @@ function OffenseWaitScreen({ view, send, busy }) {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* 強迫取分暗號：三壘有人 + <2 出局 才顯示 */}
+      {g.bases.third && g.outs < 2 && !g.pendingSteal && (
+        <div className="mt-4 rounded-xl bg-black/30 border border-red-400/25 p-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-bold text-red-200">🏃 強迫取分（squeeze play・對方看不到）</div>
+            {g.pendingSqueeze && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-500/25 text-red-200 border border-red-400/50 animate-pulse">
+                已下達
+              </span>
+            )}
+          </div>
+          <div className="mt-2 text-[11px] text-field-chalk/50 leading-relaxed">
+            出手瞬間三壘跑者衝本壘。<span className="text-red-300 font-bold">打者必須把球擊出去（界內即可得分）</span>；揮空或沒揮＝跑者本壘刺殺出局；界外＝跑者退回。⚠️ 對方 Pitch Out 破解率 90%
+          </div>
+          <button
+            disabled={busy || g.myTaunt?.ejected}
+            title={g.myTaunt?.ejected ? '總教練已被驅逐，無法下強迫取分' : undefined}
+            onClick={() => send('declare_squeeze', g.pendingSqueeze ? { cancel: true } : {})}
+            className={`mt-3 w-full rounded-lg px-3 py-2.5 text-left border transition ${
+              g.pendingSqueeze
+                ? 'bg-red-500 text-white border-red-400 font-bold'
+                : 'bg-field-grass2/60 border-field-chalk/15 text-field-chalk/85 hover:bg-field-grass2'
+            }`}
+          >
+            <div className="text-sm">{g.pendingSqueeze ? '✅ 已下強迫取分（點一下取消）' : '下達強迫取分暗號'}</div>
+          </button>
         </div>
       )}
 
@@ -1443,6 +1702,13 @@ function pitchChoiceText(choice) {
   return `${gradeTxt}${type}・${zone}${rel}`;
 }
 
+function squeezePitchOutText(r) {
+  const bits = [];
+  if (r.pitcherChoice?.pitchOut) bits.push(`🎯 Pitch Out（${r.pitcherChoice.pitchOut.height === 'high' ? '高外角' : '低外角'}）`);
+  if (r.batterChoice?.squeeze) bits.push('🏃 強迫取分');
+  return bits.length ? bits.join('・') : null;
+}
+
 function shiftText(g, r) {
   const id = r.pitcherChoice?.shift;
   return SHIFTS.find((s) => s.id === id)?.name || '—';
@@ -1459,6 +1725,7 @@ function DecisionReplay({ g, result }) {
     <div className="mt-4 grid grid-cols-1 gap-2 text-left max-w-md mx-auto">
       {[
         ['投手決策', pitchChoiceText(result.pitcherChoice)],
+        ['戰術暗號', squeezePitchOutText(result) || '（無）'],
         ['守備佈陣', shiftText(g, result)],
         ['打者反應', batter],
         ...(result.batterChoice?.contactQuality != null
@@ -1671,7 +1938,12 @@ function GameOverScreen({ view, onLeave }) {
   return (
     <div className="max-w-xl mx-auto px-6 py-16 text-center">
       <div className="font-display text-3xl font-black mb-2">比賽結束</div>
-      <div className="text-field-chalk/50 text-sm mb-6">{g.endReason}</div>
+      <div className="text-field-chalk/50 text-sm mb-4">{g.endReason}</div>
+      <div className="max-w-sm mx-auto mb-6 rounded-xl overflow-hidden border-2 border-field-chalk/25">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/gohome.png" alt="大家可以回家啦" className="w-full block" draggable={false} />
+        <div className="bg-black/40 text-center text-xs text-field-chalk/60 py-1.5">「大家可以回家啦」</div>
+      </div>
       {g.surrender?.status === 'accepted' && (
         <div className="max-w-sm mx-auto mb-6 rounded-xl overflow-hidden border-2 border-field-floodlight/40">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1711,8 +1983,25 @@ export default function Game() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(''); // 連線 / session 級錯誤（Lobby 用）
   const [actionErr, setActionErr] = useState(''); // 動作級錯誤（遊戲畫面 toast）
+  const [rejectFlash, setRejectFlash] = useState(null); // 對方拒絕投降/平手時的三秒橫幅
   const actionErrTimer = useRef(null);
+  const rejectTimer = useRef(null);
+  const lastSurrenderRef = useRef(null); // 追蹤前一個 surrender 狀態，抓「pending → null」＝拒絕
   const pollRef = useRef(null);
+
+  // 拒絕偵測：pending 狀態消失、比賽未終局＝對方拒絕了
+  useEffect(() => {
+    const cur = view?.game?.surrender;
+    const prev = lastSurrenderRef.current;
+    if (prev?.status === 'pending' && !cur && view?.game?.phase !== 'gameover') {
+      const kind = prev.kind === 'draw' ? '平手' : '投降';
+      setRejectFlash({ title: `😤 對方拒絕${kind}`, sub: '「不會那麼容易的」' });
+      if (rejectTimer.current) clearTimeout(rejectTimer.current);
+      rejectTimer.current = setTimeout(() => setRejectFlash(null), 3000);
+    }
+    lastSurrenderRef.current = cur || null;
+  }, [view?.game?.surrender, view?.game?.phase]);
+
 
   // 動作錯誤自動 4 秒消失；被 refresh 輪詢覆蓋不會清掉這個
   const showActionErr = useCallback((msg) => {
@@ -1782,6 +2071,12 @@ export default function Game() {
         INVALID: '這個選項目前不可用',
         ALREADY_READY: '你已經按過繼續了',
         SURRENDER_PENDING: '投降請求已在進行中',
+        EJECTED: '總教練已被驅逐，無法下達這個戰術',
+        BUNT_NO_RUNNER: '沒人在壘不可觸擊',
+        NO_THIRD: '三壘沒有跑者，不能下強迫取分',
+        TWO_OUTS: '兩人出局下強迫取分無意義（跑者出局＝第三出局）',
+        CONFLICT_STEAL: '已下盜壘暗號，不能再下強迫取分',
+        CONFLICT_SQUEEZE: '已下強迫取分暗號，不能再下盜壘',
         NO_SURRENDER: '目前沒有待回應的投降請求',
         NO_RUNNER: '壘上沒有可牽制／盜壘的跑者',
         PICKOFF_LIMIT: '這個打席的牽制次數已用完',
@@ -1839,6 +2134,11 @@ export default function Game() {
     <div className="min-h-screen relative overflow-hidden">
       <div className="absolute inset-0 grass-stripes floodlight-glow bg-gradient-to-b from-field-grass2 via-field-grass to-field-night" />
       <div className="relative z-10">{screen}</div>
+      {/* 挑釁系統：懸浮按鈕＋大屏幕輪播（比賽進行中才顯示） */}
+      {view?.game && view.game.phase !== 'gameover' && session && (
+        <TauntSystem view={view} send={send} busy={busy} />
+      )}
+
       {/* 彩蛋：投降輸一半——待回應時對方看大屏幕、發起方看等待橫幅 */}
       {view?.game?.surrender?.status === 'pending' && view.game.phase !== 'gameover' && (
         view.game.surrender.by === view.role ? (
@@ -1849,6 +2149,8 @@ export default function Game() {
           <SurrenderBigScreen kind={view.game.surrender.kind || 'surrender'} send={send} busy={busy} />
         )
       )}
+
+      {rejectFlash && <MemeFlash img={REJECT_IMG} title={rejectFlash.title} sub={rejectFlash.sub} />}
 
       {/* 動作錯誤浮動提示：所有遊戲畫面都能看到；4 秒自動消失，不會被輪詢覆蓋 */}
       {actionErr && session && view && (

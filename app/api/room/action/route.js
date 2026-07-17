@@ -1,4 +1,4 @@
-import { actBingoChoose, actBingoRps, actBingoMark, bingoViewFor } from '../../../../lib/bingoLogic';
+import { actBingoChoose, actBingoRps, actBingoMark, actBingoAnnounce, actBingoDrawOffer, actBingoDrawRespond, bingoViewFor } from '../../../../lib/bingoLogic';
 import { NextResponse } from 'next/server';
 import {
   viewFor,
@@ -11,6 +11,9 @@ import {
   actSurrenderOffer,
   actSurrenderRespond,
   actPickoff,
+  actTaunt,
+  actDeclareSqueeze,
+  actDeclarePitchOut,
   actDeclareSteal,
   enforceTimeouts,
 } from '../../../../lib/gameLogic';
@@ -60,6 +63,15 @@ export async function POST(req) {
             case 'bingo_mark':
               actBingoMark(room, role, payload);
               break;
+            case 'bingo_announce':
+              actBingoAnnounce(room, role);
+              break;
+            case 'bingo_draw_offer':
+              actBingoDrawOffer(room, role);
+              break;
+            case 'bingo_draw_respond':
+              actBingoDrawRespond(room, role, payload);
+              break;
             default:
               return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
           }
@@ -100,8 +112,17 @@ export async function POST(req) {
           case 'surrender_respond':
             actSurrenderRespond(room, role, payload);
             break;
+          case 'taunt':
+            actTaunt(room, role);
+            break;
           case 'pickoff':
             actPickoff(room, role);
+            break;
+          case 'declare_squeeze':
+            actDeclareSqueeze(room, role, payload);
+            break;
+          case 'declare_pitchout':
+            actDeclarePitchOut(room, role, payload);
             break;
           case 'declare_steal':
             actDeclareSteal(room, role, payload);

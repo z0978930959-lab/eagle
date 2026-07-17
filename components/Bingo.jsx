@@ -114,6 +114,7 @@ function BingoLog({ log }) {
 function BingoLobby({ error, onEnter }) {
   const [tab, setTab] = useState('create');
   const [code, setCode] = useState('');
+  const [reveal, setReveal] = useState(false); // 情報規則：false=隱藏情報（預設）、true=公開情報
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(error || '');
 
@@ -124,7 +125,7 @@ function BingoLobby({ error, onEnter }) {
       const data = await api('/api/room/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'bingo' }),
+        body: JSON.stringify({ mode: 'bingo', reveal }),
       });
       saveSession(data.code, data.token);
       onEnter(data.code, data.token, data.view);
@@ -176,13 +177,33 @@ function BingoLobby({ error, onEnter }) {
       </div>
 
       {tab === 'create' ? (
-        <button
-          disabled={busy}
-          onClick={create}
-          className="w-full py-3 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-40"
-        >
-          建立賓果房間
-        </button>
+        <div>
+          {/* 情報規則（開房者決定，整場適用） */}
+          <div className="text-left text-xs text-field-chalk/60 mb-2">情報規則</div>
+          <div className="flex flex-col gap-2 mb-5">
+            <button
+              onClick={() => setReveal(false)}
+              className={`rounded-xl border-2 px-4 py-3 text-left transition-colors ${!reveal ? 'border-field-floodlight bg-field-floodlight/10' : 'border-field-chalk/20 bg-black/25'}`}
+            >
+              <div className="text-sm font-bold">🕶️ 隱藏情報</div>
+              <div className="text-[11px] text-field-chalk/55 mt-0.5">連線數保密、終局才揭曉；聽牌只有自己知道，可選擇「宣告聽牌」嗆聲施壓</div>
+            </button>
+            <button
+              onClick={() => setReveal(true)}
+              className={`rounded-xl border-2 px-4 py-3 text-left transition-colors ${reveal ? 'border-field-floodlight bg-field-floodlight/10' : 'border-field-chalk/20 bg-black/25'}`}
+            >
+              <div className="text-sm font-bold">📊 公開情報</div>
+              <div className="text-[11px] text-field-chalk/55 mt-0.5">即時顯示雙方連線數；對方聽牌時自動警示（聽幾張）</div>
+            </button>
+          </div>
+          <button
+            disabled={busy}
+            onClick={create}
+            className="w-full py-3 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-40"
+          >
+            建立賓果房間
+          </button>
+        </div>
       ) : (
         <div className="flex gap-2">
           <input
@@ -207,7 +228,7 @@ function BingoLobby({ error, onEnter }) {
       <div className="mt-10 text-left text-[11px] text-field-chalk/45 leading-relaxed rounded-lg border border-field-chalk/12 bg-black/25 px-3 py-2.5 space-y-1">
         <div>・雙方各從三張隨機盤面挑一張（1~25 不重複），猜拳決定先手</div>
         <div>・輪到你時圈自己盤上的數字——同一個數字在對方盤上也會被圈</div>
-        <div>・畫面上方隨時顯示雙方連線數；對方「再一個號就五連線」時會警示聽牌與聽的張數</div>
+        <div>・情報規則由開房者決定：公開（即時連線數＋聽牌警示）或隱藏（終局揭曉、聽牌可自行宣告）</div>
         <div>・率先達成五連線獲勝；同一手雙方同時達標＝比連線數，一樣多平手</div>
       </div>
     </div>
@@ -290,42 +311,115 @@ function PlayScreen({ view, send, busy }) {
   const myTurn = view.turn === view.role;
   return (
     <div className="max-w-md mx-auto px-4 py-8">
-      {/* 置頂：雙方連線數 */}
-      <div className="flex items-center justify-center gap-4 mb-1">
-        <div className="text-center">
-          <div className="text-[10px] text-field-chalk/45">我方連線</div>
-          <div className="font-display text-3xl font-black text-field-floodlight">{view.myLines}</div>
+      {/* 醒目回合提示：輪到你＝大字＋跳動；對方回合＝暗色等待 */}
+      {myTurn ? (
+        <div className="mb-3 rounded-xl border-2 border-field-floodlight bg-field-floodlight/15 px-4 py-3 text-center animate-pulse shadow-[0_0_24px_rgba(255,200,60,0.25)]">
+          <div className="font-display text-2xl font-black text-field-floodlight">🔔 換你了！</div>
+          <div className="text-[11px] text-field-chalk/60 mt-0.5">點一個數字圈選（雙方盤面同步圈選）</div>
         </div>
-        <div className="text-field-chalk/25 text-xl">vs</div>
-        <div className="text-center">
-          <div className="text-[10px] text-field-chalk/45">對方連線</div>
-          <div className="font-display text-3xl font-black text-field-chalk/85">{view.oppLines}</div>
+      ) : (
+        <div className="mb-3 rounded-xl border border-field-chalk/15 bg-black/30 px-4 py-3 text-center">
+          <div className="font-display text-lg font-bold text-field-chalk/50">⏳ 對方回合</div>
+          <div className="text-[11px] text-field-chalk/35 mt-0.5">等待對方圈選中……</div>
         </div>
-      </div>
-      <div className="text-center text-[10px] text-field-chalk/40 mb-2">先達成五連線者獲勝（已圈 {view.called.length} 個號碼）</div>
+      )}
 
-      {/* 聽牌警示：對方再一號就五連線 */}
+      {/* 公開情報模式：置頂連線數 */}
+      {view.reveal && (
+        <div className="flex items-center justify-center gap-4 mb-1">
+          <div className="text-center">
+            <div className="text-[10px] text-field-chalk/45">我方連線</div>
+            <div className="font-display text-3xl font-black text-field-floodlight">{view.myLines ?? 0}</div>
+          </div>
+          <div className="text-field-chalk/25 text-xl">vs</div>
+          <div className="text-center">
+            <div className="text-[10px] text-field-chalk/45">對方連線</div>
+            <div className="font-display text-3xl font-black text-field-chalk/85">{view.oppLines ?? 0}</div>
+          </div>
+        </div>
+      )}
+      <div className="text-center text-[10px] text-field-chalk/40 mb-2">
+        已圈 {view.called.length} 個號碼・率先五連線者勝{view.reveal ? '' : '（雙方連線數保密，終局揭曉）'}
+      </div>
+
+      {/* 對方聽牌：公開模式自動警示；隱藏模式要對方主動宣告才看得到 */}
       {view.oppTenpai > 0 && (
         <div className="text-center mb-2">
           <span className="inline-block px-3 py-1 rounded-full bg-red-500/20 border border-red-400/50 text-red-300 text-xs font-bold animate-pulse">
-            ⚠️ 對方聽牌！（聽 {view.oppTenpai} 張）
-          </span>
-        </div>
-      )}
-      {view.myTenpai > 0 && (
-        <div className="text-center mb-2">
-          <span className="inline-block px-3 py-1 rounded-full bg-field-floodlight/15 border border-field-floodlight/40 text-field-floodlight text-xs font-bold">
-            🎯 你聽牌了！（聽 {view.myTenpai} 張）
+            {view.reveal ? `⚠️ 對方聽牌！（聽 ${view.oppTenpai} 張）` : `📢 對方宣告聽牌！（聽 ${view.oppTenpai} 張）`}
           </span>
         </div>
       )}
 
-      <div className={`text-center text-sm font-bold mb-3 ${myTurn ? 'text-field-floodlight' : 'text-field-chalk/50'}`}>
-        {myTurn ? '👉 輪到你——點一個數字圈選！' : '對方思考中……'}
+      {/* 自己聽牌 */}
+      {view.myTenpai > 0 && (
+        <div className="text-center mb-2 flex items-center justify-center gap-2 flex-wrap">
+          <span className="inline-block px-3 py-1 rounded-full bg-field-floodlight/15 border border-field-floodlight/40 text-field-floodlight text-xs font-bold">
+            🎯 你聽牌了（聽 {view.myTenpai} 張）{view.reveal ? '' : '——目前只有你知道'}
+          </span>
+          {!view.reveal && !view.myAnnounced && (
+            <button
+              disabled={busy}
+              onClick={() => send('bingo_announce')}
+              className="px-3 py-1 rounded-full border border-red-400/60 text-red-300 text-xs font-bold hover:bg-red-500/15 disabled:opacity-40"
+            >
+              📢 向對方宣告聽牌
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className={`rounded-2xl p-2 transition-shadow ${myTurn ? 'ring-2 ring-field-floodlight/60 shadow-[0_0_30px_rgba(255,200,60,0.15)]' : ''}`}>
+        <PlayBoard board={view.myBoard} calledSet={calledSet} myTurn={myTurn} busy={busy} onMark={(n) => send('bingo_mark', { num: n })} />
       </div>
 
-      <PlayBoard board={view.myBoard} calledSet={calledSet} myTurn={myTurn} busy={busy} onMark={(n) => send('bingo_mark', { num: n })} />
-      <div className="text-center text-[10px] text-field-chalk/35 mt-2">你圈的數字，在對方盤上也會同步被圈（反之亦然）</div>
+      {/* 平手提議 */}
+      <div className="text-center mt-3">
+        {view.drawOffer?.status === 'pending' && view.drawOffer.by === view.role ? (
+          <span className="text-xs text-field-floodlight animate-pulse">🤝 平手提議已送上大屏幕，等待對方回應…</span>
+        ) : (
+          <button
+            disabled={busy || view.drawOffer?.status === 'pending'}
+            onClick={() => send('bingo_draw_offer')}
+            className="px-4 py-1.5 rounded-full border border-field-chalk/30 text-xs text-field-chalk/70 hover:border-field-floodlight hover:text-field-floodlight disabled:opacity-40"
+          >
+            🤝 提議平手
+          </button>
+        )}
+      </div>
+
+      {/* 對方提議平手：大屏幕（投降輸一半梗圖） */}
+      {view.drawOffer?.status === 'pending' && view.drawOffer.by !== view.role && (
+        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="max-w-md w-full rounded-2xl border-4 border-field-floodlight/60 bg-field-night/95 overflow-hidden shadow-2xl">
+            <div className="bg-field-floodlight/15 px-4 py-2 text-center text-xs tracking-[0.3em] text-field-floodlight font-bold">
+              ── 球場大屏幕 ──
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/surrender.png" alt="投降輸一半" className="w-full block" draggable={false} />
+            <div className="p-5 text-center">
+              <div className="font-display text-xl font-bold mb-1">🤝 對方提議平手！</div>
+              <div className="text-xs text-field-chalk/55 mb-4">接受＝雙方握手言和、以平局結束；不接受＝繼續分勝負。</div>
+              <div className="flex gap-2 justify-center">
+                <button
+                  disabled={busy}
+                  onClick={() => send('bingo_draw_respond', { accept: true })}
+                  className="px-5 py-2 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30"
+                >
+                  平局！就平局！
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => send('bingo_draw_respond', { accept: false })}
+                  className="px-5 py-2 rounded-lg border border-red-400/50 text-red-300 font-bold disabled:opacity-30"
+                >
+                  打完再說！
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <BingoLog log={view.log} />
     </div>
@@ -340,7 +434,12 @@ function BingoOverScreen({ view, onLeave }) {
     <div className="max-w-md mx-auto px-6 py-14 text-center">
       <div className="font-display text-3xl font-black mb-2">{draw ? '🤝 平手！' : iWin ? '🏆 你贏了！' : '😵 你輸了……'}</div>
       <div className="text-field-chalk/55 text-sm mb-5">
-        我方 {linesCn(view.myLines)} 連線（{view.myLines}）｜對方 {linesCn(view.oppLines)} 連線（{view.oppLines}）
+        終局揭曉：我方 {linesCn(view.myLines ?? 0)} 連線（{view.myLines ?? 0}）｜對方 {linesCn(view.oppLines ?? 0)} 連線（{view.oppLines ?? 0}）
+      </div>
+      <div className="max-w-sm mx-auto mb-5 rounded-xl overflow-hidden border-2 border-field-chalk/25">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/gohome.png" alt="大家可以回家啦" className="w-full block" draggable={false} />
+        <div className="bg-black/40 text-center text-xs text-field-chalk/60 py-1.5">「大家可以回家啦」</div>
       </div>
       <PlayBoard board={view.myBoard} calledSet={new Set(view.called)} myTurn={false} busy onMark={() => {}} />
       <BingoLog log={view.log} />
@@ -358,8 +457,23 @@ export default function Bingo() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [actionErr, setActionErr] = useState('');
+  const [rejectFlash, setRejectFlash] = useState(null);
+  const lastDrawRef = useRef(null);
+  const rejectTimer = useRef(null);
   const errTimer = useRef(null);
   const pollRef = useRef(null);
+
+  // 拒絕偵測：drawOffer 從 pending → null 且比賽未結束＝對方拒絕
+  useEffect(() => {
+    const cur = view?.drawOffer;
+    const prev = lastDrawRef.current;
+    if (prev?.status === 'pending' && !cur && view?.phase !== 'over') {
+      setRejectFlash(true);
+      if (rejectTimer.current) clearTimeout(rejectTimer.current);
+      rejectTimer.current = setTimeout(() => setRejectFlash(false), 3000);
+    }
+    lastDrawRef.current = cur || null;
+  }, [view?.drawOffer, view?.phase]);
 
   const showActionErr = (msg) => {
     setActionErr(msg);
@@ -422,6 +536,11 @@ export default function Bingo() {
         BOARD_CLASH: '和對方撞盤了！已幫你重抽三張，請重新挑選',
         BAD_INPUT: '輸入不合法',
         NOT_STARTED: '對手尚未加入',
+        NOT_TENPAI: '你還沒聽牌，不能宣告',
+        ALREADY_ANNOUNCED: '你已經宣告過聽牌了',
+        REVEAL_MODE: '公開情報房不需要宣告（對方本來就看得到）',
+        DRAW_PENDING: '平手提議已在等待回應',
+        NO_DRAW: '目前沒有待回應的平手提議',
       };
       const known = Object.keys(TIP).find((k) => (e.code || e.message || '').includes(k));
       showActionErr(known ? TIP[known] : e.message || '操作失敗');
@@ -444,7 +563,8 @@ export default function Bingo() {
     screen = (
       <div className="max-w-md mx-auto px-6 py-16 text-center">
         <div className="font-display text-2xl font-bold mb-3">等待對手加入</div>
-        <div className="text-field-chalk/50 text-sm mb-4">把房號告訴朋友，從「賓果對決」加入</div>
+        <div className="text-field-chalk/50 text-sm mb-1">把房號告訴朋友，從「賓果對決」加入</div>
+        <div className="text-[11px] text-field-chalk/40 mb-4">本房規則：{view.reveal ? '📊 公開情報' : '🕶️ 隱藏情報'}</div>
         <button
           onClick={() => navigator.clipboard?.writeText(view.code).catch(() => {})}
           className="font-mono-tc text-5xl font-black tracking-[0.25em] text-field-floodlight"
@@ -470,6 +590,18 @@ export default function Bingo() {
     <div className="min-h-screen relative overflow-hidden">
       <div className="absolute inset-0 grass-stripes floodlight-glow bg-gradient-to-b from-field-grass2 via-field-grass to-field-night" />
       <div className="relative z-10">{screen}</div>
+      {rejectFlash && (
+        <div className="fixed inset-0 z-[68] bg-black/85 backdrop-blur-sm flex items-center justify-center px-4 pointer-events-none">
+          <div className="max-w-sm w-full rounded-2xl border-4 border-field-floodlight/60 bg-field-night/95 overflow-hidden shadow-2xl">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/notthateasy.png" alt="不會那麼容易的" className="w-full block" draggable={false} />
+            <div className="p-3 text-center">
+              <div className="font-display text-lg font-bold">😤 對方拒絕平手</div>
+              <div className="text-[11px] text-field-chalk/55 mt-1">「不會那麼容易的」</div>
+            </div>
+          </div>
+        </div>
+      )}
       {actionErr && session && view && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-md bg-red-500/90 text-white text-sm font-medium shadow-lg border border-red-300/40 max-w-[90vw]" role="alert">
           ⚠️ {actionErr}
