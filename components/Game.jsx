@@ -1003,6 +1003,7 @@ function Lobby({ onEnter, error }) {
   const [teamId, setTeamId] = useState(TEAMS[0].id);
   const [innings, setInnings] = useState(3);
   const [extraMode, setExtraMode] = useState('tiebreak');
+  const [cor, setCor] = useState(1.0); // 彈力係數：0.5 死球～1.5 彈力球，1.0 標準
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(error || '');
@@ -1014,7 +1015,7 @@ function Lobby({ onEnter, error }) {
       const data = await api('/api/room/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ innings, teamId, extraMode }),
+        body: JSON.stringify({ innings, teamId, extraMode, cor }),
       });
       saveSession(data.code, data.token);
       onEnter(data.code, data.token, data.view);
