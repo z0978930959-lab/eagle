@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { TEAMS, PITCH_TYPES, SHIFTS, ROLE_NAMES, zoneId, zoneLabel, batsLabel, throwsLabel } from '../data/teams';
-import { PITCH_TYPE_MAP, gradeOf, GRADE_PARAMS, FIELD, clampCanvas, zoneLabelFromXY, SWEET_RADIUS, CONTACT_RADIUS, POWER_SWEET_RADIUS, POWER_CONTACT_RADIUS, flightPointAt, swingWindowsOf } from '../lib/engine';
+import { PITCH_TYPE_MAP, gradeOf, GRADE_PARAMS, FIELD, clampCanvas, zoneLabelFromXY, SWEET_RADIUS, CONTACT_RADIUS, POWER_SWEET_RADIUS, POWER_CONTACT_RADIUS, flightPointAt, swingWindowsOf, releaseWindows } from '../lib/engine';
 import { battingKey, fieldingKey, currentPitcher, staminaOf } from '../lib/gameLogic';
 
 const POLL_MS = 2000;
@@ -363,9 +363,14 @@ function GameLog({ log }) {
  * 要用「離手最遠的甜蜜點」去掃到球，手（游標）本身離球遠得很。 */
 const BAT_GRIP_SVG_X = 108; // 握把（拖曳點）在 SVG 中的 x
 const BAT_SWEET_SVG_X = 34; // 甜蜜點在 SVG 中的 x
-const BAT_SWEET_FROM_GRIP_PX = BAT_GRIP_SVG_X - BAT_SWEET_SVG_X; // 甜蜜點在握把左方 74px
+const BAT_SWEET_FROM_GRIP_PX = BAT_GRIP_SVG_X - BAT_SWEET_SVG_X; // 甜蜜點與握把距離 74px
 
-function BatCursor({ gripLeftPct, gripTopPct }) {
+/* 左右打鏡像：
+ * 右打（預設）：手在右、棒頭朝左＝甜蜜點在握把「左方」
+ * 左打（flip） ：以握把為軸整支鏡像＝手在左、棒頭朝右、甜蜜點在握把「右方」
+ * 左右開弓：依對方投手手系自動站異邊（對右投站左打、對左投站右打）
+ */
+function BatCursor({ gripLeftPct, gripTopPct, flip = false }) {
   return (
     <div className="absolute pointer-events-none z-10" style={{ left: `${gripLeftPct}%`, top: `${gripTopPct}%` }}>
       <svg
@@ -373,7 +378,12 @@ function BatCursor({ gripLeftPct, gripTopPct }) {
         height="30"
         viewBox="0 0 128 30"
         className="absolute drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]"
-        style={{ left: `-${BAT_GRIP_SVG_X}px`, top: '-15px' }}
+        style={{
+          left: `-${BAT_GRIP_SVG_X}px`,
+          top: '-15px',
+          transform: flip ? 'scaleX(-1)' : undefined,
+          transformOrigin: `${BAT_GRIP_SVG_X}px 15px`,
+        }}
       >
         {/* 棒身：左端棒頭（粗）→ 右端握把（細，拖曳點） */}
         <path
@@ -400,11 +410,14 @@ function BatCursor({ gripLeftPct, gripTopPct }) {
   );
 }
 
-function BatAimGame({ path, mode = 'normal', onDone }) {
+function BatAimGame({ path, mode = 'normal', bats = 'R', pitcherThrows = 'R', onDone }) {
   const powerMode = mode === 'power';
+  // 左打＝鏡像持棒（棒頭朝右）；左右開弓依對方投手自動站異邊
+  const effectiveBats = bats === 'S' ? (pitcherThrows === 'L' ? 'R' : 'L') : bats;
+  const flip = effectiveBats === 'L';
   const [stage, setStage] = useState('windup'); // windup | flying | done
   const [ball, setBall] = useState(null); // {x,y,t}：位置＋縱深（t 越大＝越近、越大顆）
-  const [batGrip, setBatGrip] = useState({ x: 78, y: 62 }); // 握把（拖曳點）
+  const [batGrip, setBatGrip] = useState({ x: flip ? 22 : 78, y: 62 }); // 握把（拖曳點）：左打從左側持棒
   const [held, setHeld] = useState(false);
   const [verdict, setVerdict] = useState(null);
   const [countdown, setCountdown] = useState(null); // 3/2/1/0 → GO！倒數提示
@@ -496,13 +509,13 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
     const rect = el.getBoundingClientRect();
     const px = (clientX - rect.left) / rect.width;
     const py = (clientY - rect.top) / rect.height;
-    // 甜蜜點在握把「左方」BAT_SWEET_FROM_GRIP_PX，由 px 換算成畫布單位，跟棒子圖示完全一致
+    // 甜蜜點在握把旁 BAT_SWEET_FROM_GRIP_PX：右打在左方、左打（鏡像）在右方——跟棒子圖示完全一致
     const sweetOff = (BAT_SWEET_FROM_GRIP_PX / rect.width) * CANVAS_SPAN;
     const grip = {
       x: clampCanvas(FIELD.canvasMin + px * CANVAS_SPAN),
       y: clampCanvas(FIELD.canvasMin + py * CANVAS_SPAN),
     };
-    return { grip, sweet: { x: clampCanvas(grip.x - sweetOff), y: grip.y } };
+    return { grip, sweet: { x: clampCanvas(flip ? grip.x + sweetOff : grip.x - sweetOff), y: grip.y } };
   };
 
   const updateBat = (e) => {
@@ -593,7 +606,7 @@ function BatAimGame({ path, mode = 'normal', onDone }) {
         />
 
         {/* 橫拿球棒（仿真持棒）：手握棒尾跟著手指，甜蜜點在棒頭內側 */}
-        <BatCursor gripLeftPct={gripPct.x} gripTopPct={gripPct.y} />
+        <BatCursor gripLeftPct={gripPct.x} gripTopPct={gripPct.y} flip={flip} />
 
         {/* 球的殘影（讀軌跡與縱深用，不預告未來） */}
         {stage !== 'windup' && !arrived && trail.map((p, i) => (
@@ -649,11 +662,23 @@ function MemeFlash({ img, title, sub }) {
 }
 
 /* ---------------- 挑釁系統 ----------------
- * 「😤 挑釁」按鈕：第 1~4 次各對應一張梗圖（之後重複第 4 張），對方大屏幕播出。
- * 每次挑釁 40% 觸發主審警告（播裁判圖）；同一方累計兩次警告＝總教練驅逐
- * （播驅逐圖），之後無法下達盜壘、代打、佈陣（換投、牽制不受影響）。
+ * 「😤 挑釁」按鈕：第 1~11 次各對應一張梗圖（第 11 張＝摔倒，之後永遠停留在摔倒狀態），
+ * 對方大屏幕播出。每次挑釁 20% 觸發主審警告（播裁判圖），警告階梯：
+ *   1 次＝🟨 警告
+ *   2 次＝🟥 總教練驅逐（禁：盜壘、代打、佈陣）
+ *   3 次＝🟥 副教練也驅逐（追加禁：換投、牽制），並告知再犯先掉一分、直接裁定敗戰
+ *   4 次＝判對方得一分，隨即裁定敗戰、比賽結束
  */
-const TAUNT_IMGS = ['/taunt1.png', '/taunt2.png', '/taunt3.png', '/taunt4.png'];
+const TAUNT_IMGS = [
+  '/taunt1.png', '/taunt2.png', '/taunt3.png', '/taunt4.png',
+  '/taunt5.png', // 想逼我發飆啊？
+  '/taunt6.png', // 球證、旁證……怎麼和我鬥？
+  '/taunt7.png', // 回鄉下吧
+  '/taunt8.png', // 外面有記者，要不要把他們叫進來？
+  '/taunt9.png', // 老闆，你小心呀
+  '/taunt10.png', // 我小你老母
+  '/taunt11.png', // 摔倒（之後永遠停在這張）
+];
 
 function TauntSystem({ view, send, busy }) {
   const g = view?.game;
@@ -672,20 +697,42 @@ function TauntSystem({ view, send, busy }) {
 
     const queue = [];
     if (feed.by !== view.role) {
-      queue.push({ img: TAUNT_IMGS[(feed.stage || 1) - 1], title: '😤 對方挑釁！', sub: null });
+      const stageIdx = Math.min(Math.max(feed.stage || 1, 1), TAUNT_IMGS.length) - 1;
+      queue.push({ img: TAUNT_IMGS[stageIdx], title: '😤 對方挑釁！', sub: null });
     }
-    if (feed.warned && !feed.ejected) {
+    const mine = feed.by === view.role;
+    if (feed.warned && !feed.ejected && !feed.coachEjected && !feed.forfeited) {
       queue.push({
         img: '/warn.png',
-        title: '🟨 主審警告！',
-        sub: feed.by === view.role ? '你的板凳吃下警告（累計兩次＝總教練驅逐）' : '對方板凳吃下警告',
+        title: `🟨 主審警告！（累計 ${feed.warnings ?? 1}/4）`,
+        sub: mine ? '你的板凳吃下警告——兩次警告＝總教練驅逐' : '對方板凳吃下警告',
       });
     }
     if (feed.ejected) {
       queue.push({
         img: '/eject.png',
-        title: '🟥 總教練驅逐出場！',
-        sub: feed.by === view.role ? '你本場無法再下達：盜壘、代打、佈陣' : '對方本場無法再下達：盜壘、代打、佈陣',
+        title: '🟥 總教練驅逐出場！（警告 2/4）',
+        sub: mine
+          ? '你本場無法再下達：盜壘、代打、佈陣——再吃警告連副教練也驅逐！'
+          : '對方本場無法再下達：盜壘、代打、佈陣',
+      });
+    }
+    if (feed.coachEjected) {
+      queue.push({
+        img: '/eject.png',
+        title: '🟥 副教練也被驅逐！（警告 3/4）',
+        sub: mine
+          ? '你本場追加禁止：換投、牽制——主審告知：再吃警告先判掉一分，第四次警告直接裁定敗戰！'
+          : '對方追加禁止：換投、牽制——再吃一次警告他們就先掉一分、直接裁定敗戰！',
+      });
+    }
+    if (feed.forfeited) {
+      queue.push({
+        img: '/eject.png',
+        title: '⚫ 第四次警告——裁定敗戰！',
+        sub: mine
+          ? '主審先判對方得一分，隨即裁定你們輸掉比賽！'
+          : '主審先判你們得一分，隨即裁定對方輸掉比賽！',
       });
     }
     if (!queue.length) return;
@@ -704,28 +751,36 @@ function TauntSystem({ view, send, busy }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [g?.tauntFeed?.seq]);
 
-  if (!g || g.phase === 'gameover') return null;
+  if (!g) return null;
   const my = g.myTaunt;
+  const playing = g.phase !== 'gameover';
 
   return (
     <>
-      <button
-        disabled={busy}
-        onClick={() => send('taunt')}
-        title="挑釁對方（40% 機率吃裁判警告，兩次警告總教練驅逐）"
-        className="fixed bottom-4 right-4 z-40 px-3 py-2 rounded-full bg-black/60 border border-field-chalk/30 text-sm hover:border-field-floodlight hover:text-field-floodlight disabled:opacity-40"
-      >
-        😤 挑釁
-      </button>
+      {playing && (
+        <button
+          disabled={busy}
+          onClick={() => send('taunt')}
+          title="挑釁對方（20% 機率吃裁判警告：2 次總教練驅逐、3 次副教練驅逐、4 次掉一分並裁定敗戰）"
+          className="fixed bottom-4 right-4 z-40 px-3 py-2 rounded-full bg-black/60 border border-field-chalk/30 text-sm hover:border-field-floodlight hover:text-field-floodlight disabled:opacity-40"
+        >
+          😤 挑釁
+        </button>
+      )}
 
-      {my?.ejected && (
+      {playing && my?.coachEjected && (
         <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-red-900/70 border border-red-400/50 text-red-200 text-xs font-bold">
-          🟥 總教練已被驅逐（禁：盜壘/代打/佈陣）
+          🟥 總教練＋副教練驅逐（禁：盜壘/代打/佈陣/換投/牽制）・警告 {my.warnings}/4——再犯掉一分並裁定敗戰！
         </div>
       )}
-      {!my?.ejected && my?.warnings > 0 && (
+      {playing && my?.ejected && !my?.coachEjected && (
+        <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-red-900/70 border border-red-400/50 text-red-200 text-xs font-bold">
+          🟥 總教練已被驅逐（禁：盜壘/代打/佈陣）・警告 {my.warnings}/4
+        </div>
+      )}
+      {playing && !my?.ejected && my?.warnings > 0 && (
         <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-yellow-900/60 border border-yellow-400/40 text-yellow-200 text-xs font-bold">
-          🟨 板凳警告 {my.warnings}/2
+          🟨 板凳警告 {my.warnings}/4（2 次＝總教練驅逐）
         </div>
       )}
 
@@ -861,15 +916,15 @@ function SurrenderBigScreen({ kind = 'surrender', send, busy }) {
  * 在中央甜蜜點按下「揮棒」拿高分。分數 0~100 送回伺服器放大/縮小打擊結果權重。
  * 3.2 秒內沒出手＝完全沒跟上（低分自動送出）。
  */
-/* ---------------- 出手時機（四區域制） ----------------
+/* ---------------- 出手時機（四區域制・隨體力縮放） ----------------
  * 投手確認配球後彈出：光標在時機條上來回擺動（球威越高越快），按下「出手」定格。
- * 四區域（與伺服器判定一致）：
- *   ★完美（中央 |d|≤7 ，分數≥86）：指哪投哪，落點分毫不差
- *   ○不錯（|d|≤21，分數≥58）：微幅偏移——瞄邊角可能剛好偏出帶外
- *   △勉強（|d|≤36，分數≥28）：明顯偏移，邊角球風險大
- *   ✕走鐘（其餘／超時）：失投——變成超慢的紅中小便球
+ * 四區域寬度隨投手體力動態縮放（公式與伺服器 releaseWindows 完全一致）：
+ *   體力滿檔：★完美 |d|≤7、○不錯 |d|≤21、△勉強 |d|≤36、其餘＝✕走鐘
+ *   體力下滑：完美區越縮越小、被不錯/勉強區取代；
+ *   低於 80%：走鐘區開始擴大；低於 60%：走鐘區顯著遞增、完美區顯著遞減
+ *   ✕走鐘（含超時）：失投——變成超慢的紅中小便球
  */
-function SwingTimingGame({ stuff = 50, actionLabel = '出手！', onDone }) {
+function SwingTimingGame({ stuff = 50, stamina = 100, actionLabel = '出手！', onDone }) {
   const [pos, setPos] = useState(50);
   const [result, setResult] = useState(null); // { score, label, tone }
   const doneRef = useRef(false);
@@ -878,18 +933,20 @@ function SwingTimingGame({ stuff = 50, actionLabel = '出手！', onDone }) {
   const periodRef = useRef(Math.max(480, Math.min(1100, 900 - (stuff - 50) * 6)));
   // 隨機起始相位，避免背節奏
   const startRef = useRef(performance.now() - Math.random() * periodRef.current * 2);
+  // 四區域半寬（時機條半邊 0~50）：跟伺服器判定用同一個公式
+  const win = releaseWindows(stamina);
 
   const finish = useCallback((score) => {
     if (doneRef.current) return;
     doneRef.current = true;
     let label, tone;
-    if (score >= 86) { label = '★完美！指哪投哪'; tone = 'text-field-floodlight'; }
-    else if (score >= 58) { label = '○不錯！微偏'; tone = 'text-emerald-300'; }
-    else if (score >= 28) { label = '△勉強……會偏不少'; tone = 'text-yellow-300'; }
+    if (score >= 100 - 2 * win.perfect) { label = '★完美！指哪投哪'; tone = 'text-field-floodlight'; }
+    else if (score >= 100 - 2 * win.good) { label = '○不錯！微偏'; tone = 'text-emerald-300'; }
+    else if (score >= 100 - 2 * win.poor) { label = '△勉強……會偏不少'; tone = 'text-yellow-300'; }
     else { label = '✕走鐘——紅中小便球！'; tone = 'text-red-300'; }
     setResult({ score, label, tone });
     setTimeout(() => onDone(score), 700);
-  }, [onDone]);
+  }, [onDone, win.perfect, win.good, win.poor]);
 
   useEffect(() => {
     let raf;
@@ -918,20 +975,30 @@ function SwingTimingGame({ stuff = 50, actionLabel = '出手！', onDone }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center px-6 select-none">
       <div className="text-field-chalk/70 text-sm mb-1">出手時機——決定這球去哪！</div>
-      <div className="text-[11px] text-field-chalk/40 mb-5 text-center max-w-[340px]">
+      <div className="text-[11px] text-field-chalk/40 mb-1 text-center max-w-[340px]">
         ★完美＝指哪投哪｜○不錯＝微偏（邊角可能滑出帶外）｜△勉強＝大偏｜✕走鐘＝超慢紅中小便球
       </div>
+      {stamina < 100 && (
+        <div className={`text-[11px] mb-4 text-center font-bold ${stamina < 60 ? 'text-red-300' : stamina < 80 ? 'text-yellow-300' : 'text-field-chalk/55'}`}>
+          {stamina < 60
+            ? `🥵 體力 ${stamina}%——手臂快抬不起來了，完美區極小、走鐘區大開！`
+            : stamina < 80
+              ? `😮‍💨 體力 ${stamina}%——完美區縮小中，走鐘區開始擴大`
+              : `體力 ${stamina}%——完美區已略為縮小`}
+        </div>
+      )}
+      {stamina >= 100 && <div className="mb-4" />}
 
-      {/* 時機條：四區域（走鐘/勉強/不錯/★完美/不錯/勉強/走鐘） */}
+      {/* 時機條：四區域（走鐘/勉強/不錯/★完美/不錯/勉強/走鐘），寬度隨體力縮放 */}
       <div className="relative w-full max-w-sm h-12 rounded-xl bg-black/70 border border-field-chalk/25 overflow-hidden">
         <div className="absolute inset-0 flex">
-          <div className="bg-red-900/65" style={{ width: '14%' }} />
-          <div className="bg-yellow-700/50" style={{ width: '15%' }} />
-          <div className="bg-emerald-700/55" style={{ width: '14%' }} />
-          <div className="bg-field-floodlight/45" style={{ width: '14%' }} />
-          <div className="bg-emerald-700/55" style={{ width: '14%' }} />
-          <div className="bg-yellow-700/50" style={{ width: '15%' }} />
-          <div className="bg-red-900/65" style={{ width: '14%' }} />
+          <div className="bg-red-900/65" style={{ width: `${50 - win.poor}%` }} />
+          <div className="bg-yellow-700/50" style={{ width: `${win.poor - win.good}%` }} />
+          <div className="bg-emerald-700/55" style={{ width: `${win.good - win.perfect}%` }} />
+          <div className="bg-field-floodlight/45" style={{ width: `${win.perfect * 2}%` }} />
+          <div className="bg-emerald-700/55" style={{ width: `${win.good - win.perfect}%` }} />
+          <div className="bg-yellow-700/50" style={{ width: `${win.poor - win.good}%` }} />
+          <div className="bg-red-900/65" style={{ width: `${50 - win.poor}%` }} />
         </div>
         {/* 完美區中線 */}
         <div className="absolute top-0 bottom-0 left-1/2 w-[2px] -translate-x-1/2 bg-white/90" />
@@ -1216,10 +1283,11 @@ function PitcherScreen({ view, send, busy }) {
       <div className="mt-4 flex justify-center">
         <button
           onClick={() => setShowBullpen(!showBullpen)}
-          disabled={remainingArms <= 0}
+          disabled={remainingArms <= 0 || g.myTaunt?.coachEjected}
+          title={g.myTaunt?.coachEjected ? '副教練已被驅逐，無法換投' : undefined}
           className="text-xs border border-field-chalk/25 rounded-full px-3 py-1 disabled:opacity-30"
         >
-          換投（牛棚尚有 {remainingArms} 人可用）
+          {g.myTaunt?.coachEjected ? '🟥 副教練驅逐——無法換投' : `換投（牛棚尚有 ${remainingArms} 人可用）`}
         </button>
       </div>
       {showBullpen && (
@@ -1300,31 +1368,20 @@ function PitcherScreen({ view, send, busy }) {
       </div>
 
       <div className="mt-6 flex flex-col items-center gap-2">
-        {/* Pitch Out：故意投遠側壞球抓盜壘/強迫取分（暗號，對方看不到） */}
+        {/* Pitch Out：一鍵直投高外角壞球抓對方偷跑——不必拖落點、不必抓出手時機 */}
         {(g.bases.first || g.bases.second || g.bases.third) && (
           <div className="w-full max-w-[280px] rounded-xl border border-field-chalk/15 bg-black/25 px-3 py-2.5">
-            <div className="text-[11px] text-field-chalk/60 mb-1 font-bold">🎯 Pitch Out（暗號，對方看不到）</div>
+            <div className="text-[11px] text-field-chalk/60 mb-1 font-bold">🎯 Pitch Out（對方看不到）</div>
             <div className="text-[10px] text-field-chalk/45 mb-2 leading-relaxed">
-              故意投外角壞球，賭對方偷跑——高外角抓盜壘 50%、低外角 20%；抓強迫取分 90%
+              按下立刻投出高外角壞球（免落點、免出手時機），賭對方偷跑——抓盜壘 50%、抓強迫取分 90%；必為壞球
             </div>
-            <div className="flex gap-1.5">
-              {[
-                ['high', '⬆ 高外角', 'bg-red-500/20 border-red-400/60 text-red-200'],
-                ['low', '⬇ 低外角', 'bg-yellow-500/15 border-yellow-400/50 text-yellow-200'],
-              ].map(([h, label, cls]) => {
-                const on = g.pendingPitchOut?.height === h;
-                return (
-                  <button
-                    key={h}
-                    disabled={busy}
-                    onClick={() => send('declare_pitchout', on ? { cancel: true } : { height: h })}
-                    className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-bold border ${on ? cls + ' ring-2 ring-current' : 'border-field-chalk/25 text-field-chalk/70'}`}
-                  >
-                    {on ? '✅ ' : ''}{label}
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              disabled={busy}
+              onClick={() => send('pitcher_submit', { pitchOut: true, shift })}
+              className="w-full rounded-lg px-2 py-2 text-xs font-bold border bg-red-500/20 border-red-400/60 text-red-200 hover:ring-2 hover:ring-current disabled:opacity-30"
+            >
+              ⚡ 直接 Pitch Out！
+            </button>
           </div>
         )}
 
@@ -1344,11 +1401,14 @@ function PitcherScreen({ view, send, busy }) {
         </button>
         {(g.bases.first || g.bases.second) && (
           <button
-            disabled={busy || (g.pickoffsThisPA ?? 0) >= 2}
+            disabled={busy || (g.pickoffsThisPA ?? 0) >= 2 || g.myTaunt?.coachEjected}
+            title={g.myTaunt?.coachEjected ? '副教練已被驅逐，無法牽制' : undefined}
             onClick={() => send('pickoff')}
             className="mt-1 px-4 py-1.5 rounded-full text-xs font-bold border border-field-floodlight/60 text-field-floodlight disabled:opacity-30 hover:bg-field-floodlight/10"
           >
-            ⚡ 牽制{g.bases.second ? '二壘' : '一壘'}跑者（剩 {Math.max(0, 2 - (g.pickoffsThisPA ?? 0))} 次）
+            {g.myTaunt?.coachEjected
+              ? '🟥 副教練驅逐——無法牽制'
+              : `⚡ 牽制${g.bases.second ? '二壘' : '一壘'}跑者（剩 ${Math.max(0, 2 - (g.pickoffsThisPA ?? 0))} 次）`}
           </button>
         )}
         {(g.bases.first || g.bases.second) && (
@@ -1361,6 +1421,7 @@ function PitcherScreen({ view, send, busy }) {
       {releasing && (
         <SwingTimingGame
           stuff={pitcher.effStuff}
+          stamina={pitcher.stamina}
           actionLabel="出手！"
           onDone={(score) => {
             setReleasing(false);
@@ -1561,6 +1622,8 @@ function BatterScreen({ view, send, busy }) {
         <BatAimGame
           path={path}
           mode={mode}
+          bats={batter.bats}
+          pitcherThrows={oppPitcher.throws}
           onDone={({ batX, batY, swingDelta }) => {
             setReacting(false);
             submit({ batX, batY, swingDelta });
@@ -2135,8 +2198,8 @@ export default function Game() {
     <div className="min-h-screen relative overflow-hidden">
       <div className="absolute inset-0 grass-stripes floodlight-glow bg-gradient-to-b from-field-grass2 via-field-grass to-field-night" />
       <div className="relative z-10">{screen}</div>
-      {/* 挑釁系統：懸浮按鈕＋大屏幕輪播（比賽進行中才顯示） */}
-      {view?.game && view.game.phase !== 'gameover' && session && (
+      {/* 挑釁系統：懸浮按鈕＋大屏幕輪播（gameover 仍掛載，讓「裁定敗戰」畫面播得出來；按鈕自行隱藏） */}
+      {view?.game && session && (
         <TauntSystem view={view} send={send} busy={busy} />
       )}
 
