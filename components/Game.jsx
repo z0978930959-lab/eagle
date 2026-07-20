@@ -662,8 +662,9 @@ function MemeFlash({ img, title, sub }) {
 }
 
 /* ---------------- 挑釁系統 ----------------
- * 「😤 挑釁」按鈕：第 1~11 次各對應一張梗圖（第 11 張＝摔倒，之後永遠停留在摔倒狀態），
- * 對方大屏幕播出。每次挑釁 20% 觸發主審警告（播裁判圖），警告階梯：
+ * 「😤 挑釁」按鈕只出現在「擊球結果」畫面（下一球下方）。第 1~11 次各對應一張梗圖
+ * （第 11 張＝摔倒，之後永遠停留在摔倒狀態），雙方大屏幕都會強制播 3 秒；
+ * 若觸發裁判警告，警告畫面接著再播 3 秒。警告改用洗牌袋制：每 5 次挑釁「保證恰好 1 次」主審警告（哪一次隨機、真 20%），警告階梯：
  *   1 次＝🟨 警告
  *   2 次＝🟥 總教練驅逐（禁：盜壘、代打、佈陣）
  *   3 次＝🟥 副教練也驅逐（追加禁：換投、牽制），並告知再犯先掉一分、直接裁定敗戰
@@ -695,12 +696,11 @@ function TauntSystem({ view, send, busy }) {
     if (!feed || feed.seq <= seenRef.current) return;
     seenRef.current = feed.seq;
 
-    const queue = [];
-    if (feed.by !== view.role) {
-      const stageIdx = Math.min(Math.max(feed.stage || 1, 1), TAUNT_IMGS.length) - 1;
-      queue.push({ img: TAUNT_IMGS[stageIdx], title: '😤 對方挑釁！', sub: null });
-    }
     const mine = feed.by === view.role;
+    const queue = [];
+    // 挑釁梗圖：雙方都看得到（發起方也看），每張強制顯示 3 秒
+    const stageIdx = Math.min(Math.max(feed.stage || 1, 1), TAUNT_IMGS.length) - 1;
+    queue.push({ img: TAUNT_IMGS[stageIdx], title: mine ? '😤 你方挑釁！' : '😤 對方挑釁！', sub: null });
     if (feed.warned && !feed.ejected && !feed.coachEjected && !feed.forfeited) {
       queue.push({
         img: '/warn.png',
@@ -744,7 +744,7 @@ function TauntSystem({ view, send, busy }) {
       }
       setShow(queue[i]);
       i += 1;
-      timerRef.current = setTimeout(playNext, 2800);
+      timerRef.current = setTimeout(playNext, 3000); // 每張強制 3 秒（警告接著再 3 秒）
     };
     playNext();
     return () => clearTimeout(timerRef.current);
@@ -757,16 +757,7 @@ function TauntSystem({ view, send, busy }) {
 
   return (
     <>
-      {playing && (
-        <button
-          disabled={busy}
-          onClick={() => send('taunt')}
-          title="挑釁對方（20% 機率吃裁判警告：2 次總教練驅逐、3 次副教練驅逐、4 次掉一分並裁定敗戰）"
-          className="fixed bottom-4 right-4 z-40 px-3 py-2 rounded-full bg-black/60 border border-field-chalk/30 text-sm hover:border-field-floodlight hover:text-field-floodlight disabled:opacity-40"
-        >
-          😤 挑釁
-        </button>
-      )}
+      {/* 挑釁按鈕已移至「擊球結果」畫面的下一球下方（見 ResultScreen / TauntButton） */}
 
       {playing && my?.coachEjected && (
         <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-red-900/70 border border-red-400/50 text-red-200 text-xs font-bold">
@@ -785,7 +776,7 @@ function TauntSystem({ view, send, busy }) {
       )}
 
       {show && (
-        <div className="fixed inset-0 z-[65] bg-black/85 backdrop-blur-sm flex items-center justify-center px-4" onClick={() => setShow(null)}>
+        <div className="fixed inset-0 z-[65] bg-black/85 backdrop-blur-sm flex items-center justify-center px-4 pointer-events-none">
           <div className="max-w-md w-full rounded-2xl border-4 border-field-floodlight/60 bg-field-night/95 overflow-hidden shadow-2xl">
             <div className="bg-field-floodlight/15 px-4 py-2 text-center text-xs tracking-[0.3em] text-field-floodlight font-bold">
               ── 球場大屏幕 ──
@@ -795,7 +786,6 @@ function TauntSystem({ view, send, busy }) {
             <div className="p-4 text-center">
               <div className="font-display text-xl font-bold">{show.title}</div>
               {show.sub && <div className="text-xs text-field-chalk/55 mt-1">{show.sub}</div>}
-              <div className="text-[10px] text-field-chalk/35 mt-2">（點擊任意處關閉）</div>
             </div>
           </div>
         </div>
@@ -924,7 +914,7 @@ function SurrenderBigScreen({ kind = 'surrender', send, busy }) {
  *   低於 80%：走鐘區開始擴大；低於 60%：走鐘區顯著遞增、完美區顯著遞減
  *   ✕走鐘（含超時）：失投——變成超慢的紅中小便球
  */
-function SwingTimingGame({ stuff = 50, stamina = 100, actionLabel = '出手！', onDone }) {
+function SwingTimingGame({ stuff = 50, stamina = 100, grade = 'B', actionLabel = '出手！', onDone }) {
   const [pos, setPos] = useState(50);
   const [result, setResult] = useState(null); // { score, label, tone }
   const doneRef = useRef(false);
@@ -933,8 +923,8 @@ function SwingTimingGame({ stuff = 50, stamina = 100, actionLabel = '出手！',
   const periodRef = useRef(Math.max(480, Math.min(1100, 900 - (stuff - 50) * 6)));
   // 隨機起始相位，避免背節奏
   const startRef = useRef(performance.now() - Math.random() * periodRef.current * 2);
-  // 四區域半寬（時機條半邊 0~50）：跟伺服器判定用同一個公式
-  const win = releaseWindows(stamina);
+  // 四區域半寬（時機條半邊 0~50）：由「球種等級 × 體力」決定，跟伺服器判定用同一個公式
+  const win = releaseWindows(stamina, grade);
 
   const finish = useCallback((score) => {
     if (doneRef.current) return;
@@ -976,7 +966,16 @@ function SwingTimingGame({ stuff = 50, stamina = 100, actionLabel = '出手！',
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center px-6 select-none">
       <div className="text-field-chalk/70 text-sm mb-1">出手時機——決定這球去哪！</div>
       <div className="text-[11px] text-field-chalk/40 mb-1 text-center max-w-[340px]">
-        ★完美＝指哪投哪｜○不錯＝微偏（邊角可能滑出帶外）｜△勉強＝大偏｜✕走鐘＝超慢紅中小便球
+        ★完美＝落點準・球速最快・位移最兇｜○不錯＝次佳｜△勉強＝大偏・球慢位移平｜✕走鐘＝超慢紅中小便球
+      </div>
+      <div className={`text-[11px] mb-1 text-center font-bold ${grade === 'S' ? 'text-field-floodlight' : grade === 'C' ? 'text-red-300' : 'text-field-chalk/55'}`}>
+        {grade === 'S'
+          ? '🅂 拿手球路——四區完全均等，閉著眼投都穩'
+          : grade === 'A'
+            ? '🄰 拿手球路——完美區偏大'
+            : grade === 'B'
+              ? '🄱 普通球路——標準四區'
+              : '🄲 陌生球路——完美區很窄、走鐘區很大！'}
       </div>
       {stamina < 100 && (
         <div className={`text-[11px] mb-4 text-center font-bold ${stamina < 60 ? 'text-red-300' : stamina < 80 ? 'text-yellow-300' : 'text-field-chalk/55'}`}>
@@ -1422,6 +1421,7 @@ function PitcherScreen({ view, send, busy }) {
         <SwingTimingGame
           stuff={pitcher.effStuff}
           stamina={pitcher.stamina}
+          grade={grade}
           actionLabel="出手！"
           onDone={(score) => {
             setReleasing(false);
@@ -1987,6 +1987,17 @@ function ResultScreen({ view, send, busy }) {
               className="px-8 py-2.5 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-30"
             >
               下一球
+            </button>
+          )}
+          {/* 挑釁：只能在結果畫面按，雙方大屏幕都會強制播 3 秒（每 5 次保證恰好 1 次裁判警告） */}
+          {g.phase === 'result' && (
+            <button
+              disabled={busy}
+              onClick={() => send('taunt')}
+              title="挑釁對方（每 5 次保證恰好 1 次裁判警告：2 次總教練驅逐、3 次副教練驅逐、4 次掉一分並裁定敗戰）"
+              className="mt-1 px-6 py-2 rounded-lg text-sm font-bold border-2 border-red-400/70 bg-red-500/15 text-red-200 hover:bg-red-500/30 hover:border-red-300 disabled:opacity-40 shadow-[0_0_14px_rgba(239,68,68,0.25)]"
+            >
+              😤 挑釁對方板凳！
             </button>
           )}
         </div>
