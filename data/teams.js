@@ -8,6 +8,8 @@
 //   role: 'SP' 先發 / 'RP' 中繼 / 'CL' 終結者
 //   foreign: true 表示洋將（僅作情報顯示用，不做名額限制，保持操作單純）
 // 打者欄位：power 力量、contact 準度、eye 選球眼、speed 速度、bats 打擊手（'R'/'L'/'S' 左右開弓）
+//   legend: true ＝隊史傳奇代打（板凳首位、⭐ 標記），打擊三圍（力量/準度/選球）保證隊上最佳；
+//   速度依球員風格設定不追求最高。恰恰、森林王子、鋒哥、高國輝、大師兄、洪總各鎮一隊。
 //   9 棒打線＋DH 制（投手不打擊，等同全隊都用指定打擊代打投手棒次）
 //
 // 左右打對決：打者與投手同邊（同為左/左或右/右）小幅劣勢，
@@ -39,6 +41,7 @@ export const TEAMS = [
       { name: '許庭綸', pos: '外野', power: 50, contact: 66, eye: 60, speed: 76, bats: 'L' },
     ],
     bench: [
+      { name: '⭐彭政閔', pos: '傳奇‧一壘', power: 80, contact: 88, eye: 88, speed: 56, bats: 'R', legend: true },
       { name: '許基宏', pos: '一壘', power: 74, contact: 66, eye: 68, speed: 38, bats: 'R' },
       { name: '張志豪', pos: '外野', power: 60, contact: 70, eye: 66, speed: 64, bats: 'L' },
     ],
@@ -66,6 +69,7 @@ export const TEAMS = [
       { name: '許哲晏', pos: '二壘', power: 50, contact: 70, eye: 64, speed: 66, bats: 'R' },
     ],
     bench: [
+      { name: '⭐張泰山', pos: '傳奇‧三壘', power: 88, contact: 84, eye: 78, speed: 46, bats: 'R', legend: true },
       { name: '林泓弦', pos: '內野', power: 56, contact: 74, eye: 70, speed: 68, bats: 'R' },
       { name: '朱迦恩', pos: '外野', power: 58, contact: 66, eye: 60, speed: 72, bats: 'L' },
     ],
@@ -93,6 +97,7 @@ export const TEAMS = [
       { name: '馬傑森', pos: '游擊', power: 62, contact: 64, eye: 58, speed: 64, bats: 'R' },
     ],
     bench: [
+      { name: '⭐陳金鋒', pos: '傳奇‧外野', power: 92, contact: 82, eye: 80, speed: 56, bats: 'R', legend: true },
       { name: '林政華', pos: '外野', power: 52, contact: 66, eye: 60, speed: 70, bats: 'R' },
       { name: '梁家榮', pos: '內野', power: 62, contact: 68, eye: 62, speed: 54, bats: 'R' },
     ],
@@ -120,6 +125,7 @@ export const TEAMS = [
       { name: '董子恩', pos: '二壘', power: 52, contact: 70, eye: 64, speed: 72, bats: 'L' },
     ],
     bench: [
+      { name: '⭐高國輝', pos: '傳奇‧外野', power: 90, contact: 76, eye: 72, speed: 54, bats: 'L', legend: true },
       { name: '蔡佳諺', pos: '外野', power: 50, contact: 66, eye: 60, speed: 74, bats: 'L' },
       { name: '林書逸', pos: '內野', power: 52, contact: 68, eye: 64, speed: 66, bats: 'L' },
     ],
@@ -147,6 +153,7 @@ export const TEAMS = [
       { name: '張祐嘉', pos: '外野', power: 52, contact: 68, eye: 64, speed: 70, bats: 'L' },
     ],
     bench: [
+      { name: '⭐林智勝', pos: '傳奇‧內野', power: 90, contact: 80, eye: 74, speed: 50, bats: 'R', legend: true },
       { name: '王順和', pos: '外野', power: 54, contact: 68, eye: 62, speed: 66, bats: 'R' },
       { name: '曾聖安', pos: '外野', power: 56, contact: 66, eye: 60, speed: 72, bats: 'L' },
     ],
@@ -174,6 +181,7 @@ export const TEAMS = [
       { name: '林家鋐', pos: '二壘', power: 46, contact: 64, eye: 60, speed: 74, bats: 'R' },
     ],
     bench: [
+      { name: '⭐洪一中', pos: '傳奇‧捕手', power: 88, contact: 82, eye: 74, speed: 40, bats: 'R', legend: true },
       { name: '曾昱磬', pos: '內野', power: 52, contact: 64, eye: 58, speed: 72, bats: 'R' },
       { name: '紀慶然', pos: '外野', power: 56, contact: 66, eye: 60, speed: 68, bats: 'L' },
     ],

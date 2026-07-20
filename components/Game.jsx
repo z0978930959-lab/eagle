@@ -664,11 +664,10 @@ function MemeFlash({ img, title, sub }) {
 /* ---------------- 挑釁系統 ----------------
  * 「😤 挑釁」按鈕只出現在「擊球結果」畫面（下一球下方）。第 1~11 次各對應一張梗圖
  * （第 11 張＝摔倒，之後永遠停留在摔倒狀態），雙方大屏幕都會強制播 3 秒；
- * 若觸發裁判警告，警告畫面接著再播 3 秒。警告改用洗牌袋制：每 5 次挑釁「保證恰好 1 次」主審警告（哪一次隨機、真 20%），警告階梯：
- *   1 次＝🟨 警告
- *   2 次＝🟥 總教練驅逐（禁：盜壘、代打、佈陣）
- *   3 次＝🟥 副教練也驅逐（追加禁：換投、牽制），並告知再犯先掉一分、直接裁定敗戰
- *   4 次＝判對方得一分，隨即裁定敗戰、比賽結束
+ * 若觸發裁判警告，警告畫面接著再播 3 秒。警告階梯（x/5）：
+ * 1＝純警告；2＝總教練出場（禁代打）；3＝副教練出場（禁換投、代打）；
+ * 4＝教練團全數出場（禁換投、代打、盜壘、牽制＋送對方一分）；5＝裁定比賽對方勝利。
+ * 警告採洗牌袋制：每 5 次挑釁「保證恰好 1 次」主審警告（哪一次隨機、長期真 20%）。
  */
 const TAUNT_IMGS = [
   '/taunt1.png', '/taunt2.png', '/taunt3.png', '/taunt4.png',
@@ -701,38 +700,41 @@ function TauntSystem({ view, send, busy }) {
     // 挑釁梗圖：雙方都看得到（發起方也看），每張強制顯示 3 秒
     const stageIdx = Math.min(Math.max(feed.stage || 1, 1), TAUNT_IMGS.length) - 1;
     queue.push({ img: TAUNT_IMGS[stageIdx], title: mine ? '😤 你方挑釁！' : '😤 對方挑釁！', sub: null });
-    if (feed.warned && !feed.ejected && !feed.coachEjected && !feed.forfeited) {
+    if (feed.warned && !feed.ejected && !feed.coachEjected && !feed.allOut && !feed.forfeited) {
       queue.push({
         img: '/warn.png',
-        title: `🟨 主審警告！（累計 ${feed.warnings ?? 1}/4）`,
-        sub: mine ? '你的板凳吃下警告——兩次警告＝總教練驅逐' : '對方板凳吃下警告',
+        title: `🟨 主審警告！（累計 ${feed.warnings ?? 1}/5）`,
+        sub: mine ? '你的板凳吃下警告——第二次警告總教練就要出場！' : '對方板凳吃下警告',
       });
     }
     if (feed.ejected) {
       queue.push({
         img: '/eject.png',
-        title: '🟥 總教練驅逐出場！（警告 2/4）',
-        sub: mine
-          ? '你本場無法再下達：盜壘、代打、佈陣——再吃警告連副教練也驅逐！'
-          : '對方本場無法再下達：盜壘、代打、佈陣',
+        title: '🟥 總教練出場！（警告 2/5）',
+        sub: mine ? '你本場無法再下達：代打' : '對方本場無法再下達：代打',
       });
     }
     if (feed.coachEjected) {
       queue.push({
         img: '/eject.png',
-        title: '🟥 副教練也被驅逐！（警告 3/4）',
+        title: '🟥 副教練也出場！（警告 3/5）',
+        sub: mine ? '你本場無法再：換投、代打' : '對方本場無法再：換投、代打',
+      });
+    }
+    if (feed.allOut) {
+      queue.push({
+        img: '/eject.png',
+        title: '🟥 教練團全數驅逐！（警告 4/5）',
         sub: mine
-          ? '你本場追加禁止：換投、牽制——主審告知：再吃警告先判掉一分，第四次警告直接裁定敗戰！'
-          : '對方追加禁止：換投、牽制——再吃一次警告他們就先掉一分、直接裁定敗戰！',
+          ? '你本場無法再：換投、代打、盜壘、牽制——並送對方一分！再吃警告直接裁定敗戰！'
+          : '對方本場無法再：換投、代打、盜壘、牽制——你們獲判一分！',
       });
     }
     if (feed.forfeited) {
       queue.push({
         img: '/eject.png',
-        title: '⚫ 第四次警告——裁定敗戰！',
-        sub: mine
-          ? '主審先判對方得一分，隨即裁定你們輸掉比賽！'
-          : '主審先判你們得一分，隨即裁定對方輸掉比賽！',
+        title: '⚫ 第五次警告——裁定比賽！',
+        sub: mine ? '主審裁定比賽結束，對方勝利！' : '主審裁定比賽結束，你們獲勝！',
       });
     }
     if (!queue.length) return;
@@ -759,19 +761,24 @@ function TauntSystem({ view, send, busy }) {
     <>
       {/* 挑釁按鈕已移至「擊球結果」畫面的下一球下方（見 ResultScreen / TauntButton） */}
 
-      {playing && my?.coachEjected && (
+      {playing && my?.warnings >= 4 && (
         <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-red-900/70 border border-red-400/50 text-red-200 text-xs font-bold">
-          🟥 總教練＋副教練驅逐（禁：盜壘/代打/佈陣/換投/牽制）・警告 {my.warnings}/4——再犯掉一分並裁定敗戰！
+          🟥 教練團全數驅逐（禁：換投/代打/盜壘/牽制）・警告 4/5——再犯直接裁定敗戰！
         </div>
       )}
-      {playing && my?.ejected && !my?.coachEjected && (
+      {playing && my?.warnings === 3 && (
         <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-red-900/70 border border-red-400/50 text-red-200 text-xs font-bold">
-          🟥 總教練已被驅逐（禁：盜壘/代打/佈陣）・警告 {my.warnings}/4
+          🟥 總教練＋副教練出場（禁：換投/代打）・警告 3/5
         </div>
       )}
-      {playing && !my?.ejected && my?.warnings > 0 && (
+      {playing && my?.warnings === 2 && (
+        <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-red-900/70 border border-red-400/50 text-red-200 text-xs font-bold">
+          🟥 總教練出場（禁：代打）・警告 2/5
+        </div>
+      )}
+      {playing && my?.warnings === 1 && (
         <div className="fixed bottom-4 left-4 z-40 px-3 py-1.5 rounded-full bg-yellow-900/60 border border-yellow-400/40 text-yellow-200 text-xs font-bold">
-          🟨 板凳警告 {my.warnings}/4（2 次＝總教練驅逐）
+          🟨 板凳警告 1/5（第二次總教練出場）
         </div>
       )}
 
@@ -1282,11 +1289,11 @@ function PitcherScreen({ view, send, busy }) {
       <div className="mt-4 flex justify-center">
         <button
           onClick={() => setShowBullpen(!showBullpen)}
-          disabled={remainingArms <= 0 || g.myTaunt?.coachEjected}
-          title={g.myTaunt?.coachEjected ? '副教練已被驅逐，無法換投' : undefined}
+          disabled={remainingArms <= 0 || (g.myTaunt?.warnings || 0) >= 3}
+          title={(g.myTaunt?.warnings || 0) >= 3 ? '副教練已出場，無法換投' : undefined}
           className="text-xs border border-field-chalk/25 rounded-full px-3 py-1 disabled:opacity-30"
         >
-          {g.myTaunt?.coachEjected ? '🟥 副教練驅逐——無法換投' : `換投（牛棚尚有 ${remainingArms} 人可用）`}
+          {(g.myTaunt?.warnings || 0) >= 3 ? '🟥 副教練出場——無法換投' : `換投（牛棚尚有 ${remainingArms} 人可用）`}
         </button>
       </div>
       {showBullpen && (
@@ -1353,8 +1360,6 @@ function PitcherScreen({ view, send, busy }) {
             <button
               key={sh.id}
               onClick={() => setShift(sh.id)}
-              disabled={g.myTaunt?.ejected}
-              title={g.myTaunt?.ejected ? '總教練已被驅逐，佈陣固定為一般站位' : undefined}
               className={`px-3 py-1.5 rounded-full text-sm border disabled:opacity-30 ${shift === sh.id ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold' : 'border-field-chalk/25'}`}
             >
               {sh.name}
@@ -1400,13 +1405,13 @@ function PitcherScreen({ view, send, busy }) {
         </button>
         {(g.bases.first || g.bases.second) && (
           <button
-            disabled={busy || (g.pickoffsThisPA ?? 0) >= 2 || g.myTaunt?.coachEjected}
-            title={g.myTaunt?.coachEjected ? '副教練已被驅逐，無法牽制' : undefined}
+            disabled={busy || (g.pickoffsThisPA ?? 0) >= 2 || (g.myTaunt?.warnings || 0) >= 4}
+            title={(g.myTaunt?.warnings || 0) >= 4 ? '教練團全數驅逐，無法牽制' : undefined}
             onClick={() => send('pickoff')}
             className="mt-1 px-4 py-1.5 rounded-full text-xs font-bold border border-field-floodlight/60 text-field-floodlight disabled:opacity-30 hover:bg-field-floodlight/10"
           >
-            {g.myTaunt?.coachEjected
-              ? '🟥 副教練驅逐——無法牽制'
+            {(g.myTaunt?.warnings || 0) >= 4
+              ? '🟥 教練團全數驅逐——無法牽制'
               : `⚡ 牽制${g.bases.second ? '二壘' : '一壘'}跑者（剩 ${Math.max(0, 2 - (g.pickoffsThisPA ?? 0))} 次）`}
           </button>
         )}
@@ -1493,8 +1498,8 @@ function BatterScreen({ view, send, busy }) {
           </div>
           <button
             onClick={() => setShowBench(!showBench)}
-            disabled={availableBench.length === 0 || g.myTaunt?.ejected}
-            title={g.myTaunt?.ejected ? '總教練已被驅逐，無法代打' : undefined}
+            disabled={availableBench.length === 0 || (g.myTaunt?.warnings || 0) >= 2}
+            title={(g.myTaunt?.warnings || 0) >= 2 ? '總教練已出場，無法代打' : undefined}
             className="mt-1.5 text-[11px] border border-field-chalk/25 rounded-full px-2.5 py-0.5 disabled:opacity-30"
           >
             代打（剩 {availableBench.length}）
@@ -1674,8 +1679,8 @@ function OffenseWaitScreen({ view, send, busy }) {
               return (
                 <button
                   key={b}
-                  disabled={busy || g.myTaunt?.ejected}
-                  title={g.myTaunt?.ejected ? '總教練已被驅逐，無法下盜壘暗號' : undefined}
+                  disabled={busy || (g.myTaunt?.warnings || 0) >= 4}
+                  title={(g.myTaunt?.warnings || 0) >= 4 ? '教練團全數驅逐，無法下盜壘暗號' : undefined}
                   onClick={() => send('declare_steal', { base: on ? null : b })}
                   className={`rounded-lg px-3 py-2.5 text-left border transition ${on
                     ? 'bg-field-floodlight text-field-night border-field-floodlight font-bold'
@@ -1707,8 +1712,8 @@ function OffenseWaitScreen({ view, send, busy }) {
             出手瞬間三壘跑者衝本壘。<span className="text-red-300 font-bold">打者必須把球擊出去（界內即可得分）</span>；揮空或沒揮＝跑者本壘刺殺出局；界外＝跑者退回。⚠️ 對方 Pitch Out 破解率 90%
           </div>
           <button
-            disabled={busy || g.myTaunt?.ejected}
-            title={g.myTaunt?.ejected ? '總教練已被驅逐，無法下強迫取分' : undefined}
+            disabled={busy || (g.myTaunt?.warnings || 0) >= 4}
+            title={(g.myTaunt?.warnings || 0) >= 4 ? '教練團全數驅逐，無法下強迫取分' : undefined}
             onClick={() => send('declare_squeeze', g.pendingSqueeze ? { cancel: true } : {})}
             className={`mt-3 w-full rounded-lg px-3 py-2.5 text-left border transition ${
               g.pendingSqueeze
@@ -1994,7 +1999,7 @@ function ResultScreen({ view, send, busy }) {
             <button
               disabled={busy}
               onClick={() => send('taunt')}
-              title="挑釁對方（每 5 次保證恰好 1 次裁判警告：2 次總教練驅逐、3 次副教練驅逐、4 次掉一分並裁定敗戰）"
+              title="挑釁對方（每 5 次保證恰好 1 次裁判警告：2 次禁代打、3 次禁換投、4 次禁盜壘牽制＋送一分、5 次裁定敗戰）"
               className="mt-1 px-6 py-2 rounded-lg text-sm font-bold border-2 border-red-400/70 bg-red-500/15 text-red-200 hover:bg-red-500/30 hover:border-red-300 disabled:opacity-40 shadow-[0_0_14px_rgba(239,68,68,0.25)]"
             >
               😤 挑釁對方板凳！
