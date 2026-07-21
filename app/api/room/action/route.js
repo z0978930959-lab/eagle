@@ -15,6 +15,8 @@ import {
   actDeclareSqueeze,
   actDeclarePitchOut,
   actDeclareSteal,
+  actForceRight,
+  actRematch,
   enforceTimeouts,
 } from '../../../../lib/gameLogic';
 import { getRoom, storeReady, withRoomLock, assertCode } from '../../../../lib/store';
@@ -126,6 +128,12 @@ export async function POST(req) {
             break;
           case 'declare_steal':
             actDeclareSteal(room, role, payload);
+            break;
+          case 'force_right':
+            actForceRight(room, role, payload);
+            break;
+          case 'rematch':
+            actRematch(room, role);
             break;
           default:
             return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });

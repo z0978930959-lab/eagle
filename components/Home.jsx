@@ -29,8 +29,8 @@ export default function Home() {
     <div className="min-h-screen relative overflow-hidden">
       <div className="absolute inset-0 grass-stripes floodlight-glow bg-gradient-to-b from-field-grass2 via-field-grass to-field-night" />
       <div className="relative z-10 max-w-md mx-auto px-6 py-20 text-center">
-        <div className="font-display text-5xl font-black tracking-wide mb-2">中職對戰</div>
-        <div className="text-field-chalk/50 text-sm mb-10">選一個遊戲，開房揪朋友對決</div>
+        <div className="font-display text-5xl font-black tracking-wide mb-2">資訊軟體開發</div>
+        <div className="text-field-chalk/50 text-sm mb-10">選擇要進入的開發模組</div>
 
         <div className="flex flex-col gap-4">
           <button

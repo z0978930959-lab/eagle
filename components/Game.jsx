@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { TEAMS, PITCH_TYPES, SHIFTS, ROLE_NAMES, zoneId, zoneLabel, batsLabel, throwsLabel } from '../data/teams';
 import { PITCH_TYPE_MAP, gradeOf, GRADE_PARAMS, FIELD, clampCanvas, zoneLabelFromXY, SWEET_RADIUS, CONTACT_RADIUS, POWER_SWEET_RADIUS, POWER_CONTACT_RADIUS, flightPointAt, swingWindowsOf, releaseWindows } from '../lib/engine';
 import { battingKey, fieldingKey, currentPitcher, staminaOf } from '../lib/gameLogic';
@@ -317,11 +317,42 @@ function Scoreboard({ g }) {
         <Diamond bases={g.bases} />
         <div className="text-sm">{balls} 壞 － {strikes} 好</div>
       </div>
+      <MomentumBar g={g} />
       {g.notice && (
         <div className="mt-2 text-center text-xs bg-field-floodlight/15 border border-field-floodlight/40 rounded-md py-1.5 px-2 text-field-floodlight font-bold">
           {g.notice.text}
         </div>
       )}
+    </div>
+  );
+}
+
+/* 氣勢條（公開）：g.momentum ∈ [-100,100]，>0 倒向客隊、<0 倒向主隊。
+ * 條的填色從中線往氣勢方延伸；氣勢滿檔時該方下一球獲得小幅加成。 */
+function MomentumBar({ g }) {
+  const m = Math.max(-100, Math.min(100, g.momentum || 0));
+  const awayColor = g.away.team.color;
+  const homeColor = g.home.team.color;
+  const pct = Math.abs(m) / 2; // 0~50%（從中線往單側延伸）
+  const toAway = m > 0;
+  const label = Math.abs(m) < 8 ? '勢均力敵' : `氣勢：${toAway ? g.away.team.short : g.home.team.short}`;
+  return (
+    <div className="mt-2">
+      <div className="relative h-2 rounded-full bg-black/50 overflow-hidden border border-field-chalk/10">
+        {/* 中線 */}
+        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-field-chalk/25 -translate-x-1/2 z-10" />
+        {m !== 0 && (
+          <div
+            className="absolute top-0 bottom-0 transition-all duration-500"
+            style={
+              toAway
+                ? { right: '50%', width: `${pct}%`, background: awayColor, opacity: 0.85 }
+                : { left: '50%', width: `${pct}%`, background: homeColor, opacity: 0.85 }
+            }
+          />
+        )}
+      </div>
+      <div className="text-center text-[9px] text-field-chalk/45 mt-0.5 tracking-wide">🔥 {label}</div>
     </div>
   );
 }
@@ -807,19 +838,21 @@ function TauntSystem({ view, send, busy }) {
  *   平局：「指叉球」（投手）或「強力打擊」（打者）——接受＝握手言和
  * 發起後對方的大屏幕會播出對應經典畫面並選擇是否接受。
  */
-const REJECT_IMG = '/notthateasy.png'; // 拒絕投降/平手 → 三秒橫幅
+const REJECT_IMG = '/notthateasy.png'; // 拒絕平手 → 三秒橫幅（draw 用）
+const SURRENDER_REJECT_IMG = '/reject4.png'; // 拒絕投降 → 三秒橫幅（Image 4）
+const RECONCILE_IMG = '/reconcile.png'; // 投降被接受＝和好 → 結算畫面（Image 3）
 const BETRAY_IMG = '/betray.png'; // 變速球三連點 → 三秒橫幅
 
 const EGGS = {
   surrender: {
-    img: '/surrender.png',
+    img: '/surrender2.png',
     icon: '🏳️',
     askTitle: '要向對方提出「投降輸一半」嗎？',
-    askDesc: '對方的大屏幕會播出你的投降請求；對方接受＝你直接認輸。',
-    yesBtn: '舉白旗！',
-    bigTitle: '🏳️ 對方請求：投降輸一半！',
-    bigDesc: '接受＝對方認輸、比賽立刻結束；不接受＝把白旗丟回去，繼續打。',
-    acceptBtn: '對啊！這裡流行投降輸一半',
+    askDesc: '對方接受＝這局算平手、握手言和，之後可以重開一局再打。',
+    yesBtn: '舉白旗！投降輸一半～',
+    bigTitle: '🏳️ 對方舉白旗：投降輸一半！',
+    bigDesc: '接受＝這局算平手、握手言和，然後重開一局再打吧；不接受＝把白旗丟回去繼續打。',
+    acceptBtn: '好啦～投降輸一半，重開一局！',
     declineBtn: '不接受，打完！',
   },
   draw: {
@@ -1468,6 +1501,8 @@ function BatterScreen({ view, send, busy }) {
   const oppSide = g[fKey];
   const oppPitcher = currentPitcher(oppSide);
   const batter = side.lineup[side.lineupIdx % side.lineup.length];
+  const forceRight = !!side.forceRight; // [取消左打]：全隊以右打計算
+  const effBats = forceRight ? 'R' : batter.bats;
   const shift = g.pendingPitch?.shift || 'normal';
   const path = g.pendingPitch?.path;
   const availableBench = side.bench.filter((b) => !b.used);
@@ -1493,7 +1528,7 @@ function BatterScreen({ view, send, busy }) {
             <ForeignTag show={batter.foreign} />
           </div>
           <div className="text-[10px] text-field-chalk/50 mt-1 leading-relaxed">
-            {batsLabel(batter.bats)}<br />
+            {batsLabel(effBats)}{forceRight && batter.bats !== 'R' && <span className="text-field-floodlight/80">（已改右打）</span>}<br />
             力 {batter.power}／準 {batter.contact}／眼 {batter.eye}／速 {batter.speed}
           </div>
           <button
@@ -1504,6 +1539,16 @@ function BatterScreen({ view, send, busy }) {
           >
             代打（剩 {availableBench.length}）
           </button>
+          <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-field-chalk/70 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={forceRight}
+              disabled={busy}
+              onChange={(e) => send('force_right', { on: e.target.checked })}
+              className="accent-field-floodlight"
+            />
+            取消左打（全改右打）
+          </label>
         </div>
         <div className="rounded-xl bg-black/30 border border-field-chalk/12 px-3 py-2.5">
           <div className="text-[10px] text-field-chalk/40 mb-1">敵方投手</div>
@@ -1627,7 +1672,7 @@ function BatterScreen({ view, send, busy }) {
         <BatAimGame
           path={path}
           mode={mode}
-          bats={batter.bats}
+          bats={effBats}
           pitcherThrows={oppPitcher.throws}
           onDone={({ batX, batY, swingDelta }) => {
             setReacting(false);
@@ -2013,28 +2058,40 @@ function ResultScreen({ view, send, busy }) {
   );
 }
 
-function GameOverScreen({ view, onLeave }) {
+/* 結束畫面梗圖輪播（Image 5/6/7）：每次進入結算輪流換一張 */
+const END_IMGS = [
+  { src: '/end1.png', cap: '香檳開了——這場穩了！' },
+  { src: '/end2.png', cap: '現在幾比幾？' },
+  { src: '/end3.png', cap: '為什麼我的命運會這麼的悲慘…' },
+];
+let __endImgCounter = 0;
+
+function GameOverScreen({ view, onLeave, send, busy }) {
   const g = view.game;
+  // 投降被接受＝和好平手：改放 Image 3；否則走結束圖輪播
+  const surrenderReconcile = g.surrender?.status === 'accepted' && g.surrender.kind === 'surrender';
+  const endImg = useMemo(() => END_IMGS[(__endImgCounter++) % END_IMGS.length], []);
+  const mvp = g.mvp;
+
   return (
     <div className="max-w-xl mx-auto px-6 py-16 text-center">
-      <div className="font-display text-3xl font-black mb-2">比賽結束</div>
+      <div className="font-display text-3xl font-black mb-2">{surrenderReconcile ? '握手言和' : '比賽結束'}</div>
       <div className="text-field-chalk/50 text-sm mb-4">{g.endReason}</div>
-      <div className="max-w-sm mx-auto mb-6 rounded-xl overflow-hidden border-2 border-field-chalk/25">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/gohome.png" alt="大家可以回家啦" className="w-full block" draggable={false} />
-        <div className="bg-black/40 text-center text-xs text-field-chalk/60 py-1.5">「大家可以回家啦」</div>
-      </div>
-      {g.surrender?.status === 'accepted' && (
+
+      {surrenderReconcile ? (
         <div className="max-w-sm mx-auto mb-6 rounded-xl overflow-hidden border-2 border-field-floodlight/40">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={(EGGS[g.surrender.kind] || EGGS.surrender).img}
-            alt={g.endReason}
-            className="w-full block"
-            draggable={false}
-          />
+          <img src={RECONCILE_IMG} alt="握手言和" className="w-full block" draggable={false} />
+          <div className="bg-black/40 text-center text-xs text-field-chalk/60 py-1.5">「投降輸一半——這局平手，重開一局再打吧！」</div>
+        </div>
+      ) : (
+        <div className="max-w-sm mx-auto mb-6 rounded-xl overflow-hidden border-2 border-field-chalk/25">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={endImg.src} alt={endImg.cap} className="w-full block" draggable={false} />
+          <div className="bg-black/40 text-center text-xs text-field-chalk/60 py-1.5">「{endImg.cap}」</div>
         </div>
       )}
+
       <div className="flex items-center justify-center gap-6 mb-6">
         <div>
           <div className="font-display font-bold" style={{ color: g.away.team.color }}>{g.away.team.short}</div>
@@ -2046,11 +2103,51 @@ function GameOverScreen({ view, onLeave }) {
           <div className="text-4xl font-mono-tc font-bold">{g.home.score}</div>
         </div>
       </div>
-      <div className="text-lg font-bold mb-8">{g.winner ? `🏆 ${g.winner} 獲勝！` : '平手！'}</div>
+      <div className="text-lg font-bold mb-6">{g.winner ? `🏆 ${g.winner} 獲勝！` : '平手！'}</div>
+
+      {/* 賽後 MVP 圖卡（照片：傑立鼠） */}
+      <MvpCard mvp={mvp} />
+
       <BoxScore g={g} />
-      <button onClick={onLeave} className="mt-7 px-8 py-2.5 rounded-lg bg-field-floodlight text-field-night font-bold">
-        回到大廳
-      </button>
+
+      <div className="mt-7 flex flex-col sm:flex-row items-center justify-center gap-3">
+        <button
+          disabled={busy}
+          onClick={() => send('rematch')}
+          className="px-8 py-2.5 rounded-lg bg-field-floodlight text-field-night font-bold disabled:opacity-40"
+        >
+          🔄 重新開始
+        </button>
+        <button onClick={onLeave} className="px-8 py-2.5 rounded-lg border border-field-chalk/30 text-field-chalk/80">
+          回到大廳
+        </button>
+      </div>
+      <div className="text-[10px] text-field-chalk/35 mt-2">「重新開始」＝沿用同房號、同兩隊、同設定重開一局</div>
+    </div>
+  );
+}
+
+/* 賽後 MVP 圖卡：照片放傑立鼠，配上本場最佳貢獻打者 */
+function MvpCard({ mvp }) {
+  return (
+    <div className="max-w-sm mx-auto mb-7 rounded-2xl overflow-hidden border-2 border-yellow-400/60 bg-gradient-to-b from-yellow-500/10 to-black/40 shadow-[0_0_22px_rgba(250,204,21,0.25)]">
+      <div className="bg-yellow-400/20 py-1.5 text-xs font-bold tracking-[0.35em] text-yellow-200">★ 本 場 M V P ★</div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/mvp.png" alt="本場 MVP" className="w-32 h-32 object-cover rounded-full mx-auto mt-4 border-4 border-yellow-400/70" draggable={false} />
+      {mvp ? (
+        <div className="px-5 py-4">
+          <div className="font-display text-xl font-black" style={{ color: mvp.teamColor }}>{mvp.name}</div>
+          <div className="text-[11px] text-field-chalk/55 mt-0.5">{mvp.teamShort}</div>
+          <div className="text-sm text-field-chalk/80 mt-2">
+            {mvp.hits} 安打{mvp.hr > 0 ? `・${mvp.hr} 轟` : ''}・{mvp.rbi} 打點
+          </div>
+        </div>
+      ) : (
+        <div className="px-5 py-4">
+          <div className="font-display text-lg font-black text-field-chalk/80">投手戰・從缺</div>
+          <div className="text-[11px] text-field-chalk/50 mt-1">這場沒人打出關鍵一擊，MVP 由傑立鼠自己收下了</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2074,8 +2171,13 @@ export default function Game() {
     const cur = view?.game?.surrender;
     const prev = lastSurrenderRef.current;
     if (prev?.status === 'pending' && !cur && view?.game?.phase !== 'gameover') {
-      const kind = prev.kind === 'draw' ? '平手' : '投降';
-      setRejectFlash({ title: `😤 對方拒絕${kind}`, sub: '「不會那麼容易的」' });
+      const isDraw = prev.kind === 'draw';
+      const kind = isDraw ? '平手' : '投降';
+      setRejectFlash({
+        title: `😤 對方拒絕${kind}`,
+        sub: isDraw ? '「氣不夠了？繼續打！」' : '「想投降？把比賽打完！」',
+        img: isDraw ? REJECT_IMG : SURRENDER_REJECT_IMG,
+      });
       if (rejectTimer.current) clearTimeout(rejectTimer.current);
       rejectTimer.current = setTimeout(() => setRejectFlash(null), 3000);
     }
@@ -2189,7 +2291,7 @@ export default function Game() {
     const myTurnBatter = g.phase === 'batter' && view.role === battingKey(g.half);
 
     if (g.phase === 'gameover') {
-      screen = <GameOverScreen view={view} onLeave={leave} />;
+      screen = <GameOverScreen view={view} onLeave={leave} send={send} busy={busy} />;
     } else if (g.phase === 'result') {
       screen = <ResultScreen view={view} send={send} busy={busy} />;
     } else if (myTurnPitcher) {
@@ -2230,7 +2332,7 @@ export default function Game() {
         )
       )}
 
-      {rejectFlash && <MemeFlash img={REJECT_IMG} title={rejectFlash.title} sub={rejectFlash.sub} />}
+      {rejectFlash && <MemeFlash img={rejectFlash.img || REJECT_IMG} title={rejectFlash.title} sub={rejectFlash.sub} />}
 
       {/* 動作錯誤浮動提示：所有遊戲畫面都能看到；4 秒自動消失，不會被輪詢覆蓋 */}
       {actionErr && session && view && (

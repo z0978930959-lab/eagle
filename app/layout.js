@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: '中職對戰｜文字棒球對決',
-  description: '線上雙人即時對戰的逐球猜球心理戰棒球遊戲',
+  title: '資訊軟體開發',
+  description: '專案模組整合與進度管理工具',
 };
 
 export default function RootLayout({ children }) {
