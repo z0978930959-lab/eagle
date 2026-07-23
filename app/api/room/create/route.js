@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRoom, viewFor } from '../../../../lib/gameLogic';
 import { createBingoRoom, bingoViewFor } from '../../../../lib/bingoLogic';
+import { createSplendorRoom, splendorViewFor } from '../../../../lib/splendorLogic';
 import { createRoomIfAbsent, storeReady, rateLimit } from '../../../../lib/store';
 import { safeErrorCode, errorResponseInfo } from '../../../../lib/apiError';
 import { clientIp } from '../../../../lib/clientIp';
@@ -38,7 +39,8 @@ export async function POST(req) {
   }
   const { innings, teamId, extraMode, mode, reveal, cor } = body || {};
   const isBingo = mode === 'bingo';
-  if (!isBingo && (![1, 3].includes(innings) || typeof teamId !== 'string' || (extraMode && !['cpbl', 'tiebreak'].includes(extraMode)))) {
+  const isSplendor = mode === 'splendor';
+  if (!isBingo && !isSplendor && (![1, 3].includes(innings) || typeof teamId !== 'string' || (extraMode && !['cpbl', 'tiebreak'].includes(extraMode)))) {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
 
@@ -46,7 +48,11 @@ export async function POST(req) {
     const code = genCode();
     let room;
     try {
-      room = isBingo ? createBingoRoom({ code, reveal: !!reveal }) : createRoom({ code, innings, awayTeamId: teamId, extraMode, cor });
+      room = isSplendor
+        ? createSplendorRoom({ code })
+        : isBingo
+          ? createBingoRoom({ code, reveal: !!reveal })
+          : createRoom({ code, innings, awayTeamId: teamId, extraMode, cor });
     } catch (e) {
       return NextResponse.json({ error: safeErrorCode(e) }, { status: 400 });
     }
@@ -56,7 +62,11 @@ export async function POST(req) {
         return NextResponse.json({
           code,
           token: room.tokens.away,
-          view: isBingo ? bingoViewFor(room, 'away') : viewFor(room, 'away'),
+          view: isSplendor
+            ? splendorViewFor(room, 'away')
+            : isBingo
+              ? bingoViewFor(room, 'away')
+              : viewFor(room, 'away'),
         });
       }
     } catch (e) {

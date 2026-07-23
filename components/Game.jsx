@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import Chat from './Chat';
 import { TEAMS, PITCH_TYPES, SHIFTS, ROLE_NAMES, zoneId, zoneLabel, batsLabel, throwsLabel } from '../data/teams';
 import { PITCH_TYPE_MAP, gradeOf, GRADE_PARAMS, FIELD, clampCanvas, zoneLabelFromXY, SWEET_RADIUS, CONTACT_RADIUS, POWER_SWEET_RADIUS, POWER_CONTACT_RADIUS, flightPointAt, swingWindowsOf, releaseWindows } from '../lib/engine';
 import { battingKey, fieldingKey, currentPitcher, staminaOf } from '../lib/gameLogic';
@@ -2333,6 +2334,17 @@ export default function Game() {
       )}
 
       {rejectFlash && <MemeFlash img={rejectFlash.img || REJECT_IMG} title={rejectFlash.title} sub={rejectFlash.sub} />}
+
+      {session && view && (
+        <Chat
+          code={session.code}
+          token={session.token}
+          chat={view.chat}
+          role={view.chatRole || view.role}
+          labels={{ away: '客隊（建房方）', home: '主隊（加入方）' }}
+          onView={setView}
+        />
+      )}
 
       {/* 動作錯誤浮動提示：所有遊戲畫面都能看到；4 秒自動消失，不會被輪詢覆蓋 */}
       {actionErr && session && view && (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import Chat from './Chat';
 
 /* ------------------------------------------------------------------
  * 賓果對決前端
@@ -601,6 +602,16 @@ export default function Bingo() {
             </div>
           </div>
         </div>
+      )}
+      {session && view && (
+        <Chat
+          code={session.code}
+          token={session.token}
+          chat={view.chat}
+          role={view.chatRole || view.role}
+          labels={{ away: '建房方', home: '加入方' }}
+          onView={setView}
+        />
       )}
       {actionErr && session && view && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-md bg-red-500/90 text-white text-sm font-medium shadow-lg border border-red-300/40 max-w-[90vw]" role="alert">

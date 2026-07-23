@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { joinRoom, viewFor } from '../../../../lib/gameLogic';
 import { joinBingoRoom, bingoViewFor } from '../../../../lib/bingoLogic';
+import { joinSplendorRoom, splendorViewFor } from '../../../../lib/splendorLogic';
 import { getRoom, storeReady, withRoomLock, assertCode, rateLimit } from '../../../../lib/store';
 import { safeErrorCode, errorResponseInfo } from '../../../../lib/apiError';
 import { clientIp } from '../../../../lib/clientIp';
@@ -28,7 +29,8 @@ export async function POST(req) {
   }
   const { code, teamId, mode } = body || {};
   const isBingo = mode === 'bingo';
-  if (!isBingo && typeof teamId !== 'string') {
+  const isSplendor = mode === 'splendor';
+  if (!isBingo && !isSplendor && typeof teamId !== 'string') {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
   try {
@@ -42,10 +44,21 @@ export async function POST(req) {
       const room = await getRoom(code);
       if (!room) return NextResponse.json({ error: 'NOT_FOUND', message: '找不到這個房號' }, { status: 404 });
       if (room.status !== 'waiting') return NextResponse.json({ error: 'ROOM_FULL', message: '房間已滿或比賽已開始' }, { status: 409 });
-      // 兩種遊戲共用房號池：模式對不上就擋（避免用棒球介面誤入賓果房）
-      const roomIsBingo = room.type === 'bingo';
-      if (roomIsBingo !== isBingo) {
-        return NextResponse.json({ error: 'WRONG_MODE', message: roomIsBingo ? '這是賓果房，請從賓果模式加入' : '這是棒球房，請從棒球模式加入' }, { status: 409 });
+      // 三種遊戲共用房號池：模式對不上就擋（避免用錯的介面誤入他人房間）
+      const roomMode = room.type === 'bingo' ? 'bingo' : room.type === 'splendor' ? 'splendor' : 'baseball';
+      const wantMode = isSplendor ? 'splendor' : isBingo ? 'bingo' : 'baseball';
+      if (roomMode !== wantMode) {
+        const label = { bingo: '賓果', splendor: '璀璨寶石', baseball: '棒球' }[roomMode];
+        return NextResponse.json({ error: 'WRONG_MODE', message: `這是${label}房，請從${label}模式加入` }, { status: 409 });
+      }
+      if (isSplendor) {
+        try {
+          joinSplendorRoom(room);
+        } catch (e) {
+          return NextResponse.json({ error: safeErrorCode(e) }, { status: 409 });
+        }
+        await guardedSetRoom(code, room);
+        return NextResponse.json({ code, token: room.tokens.home, view: splendorViewFor(room, 'home') });
       }
       if (isBingo) {
         try {

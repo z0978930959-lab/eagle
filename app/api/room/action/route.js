@@ -1,3 +1,5 @@
+import { actSpTake, actSpBuy, actSpReserve, actSpDiscard, actSpNoble, actSpRematch, splendorViewFor } from '../../../../lib/splendorLogic';
+import { pushChat, chatOf } from '../../../../lib/chat';
 import { actBingoChoose, actBingoRps, actBingoMark, actBingoAnnounce, actBingoDrawOffer, actBingoDrawRespond, bingoViewFor } from '../../../../lib/bingoLogic';
 import { NextResponse } from 'next/server';
 import {
@@ -23,6 +25,17 @@ import { getRoom, storeReady, withRoomLock, assertCode } from '../../../../lib/s
 import { safeErrorCode, errorResponseInfo } from '../../../../lib/apiError';
 
 export const dynamic = 'force-dynamic';
+
+function withChat(view, room, role) {
+  return { ...view, chat: chatOf(room), chatRole: role };
+}
+
+// 依房型挑對應的 viewFor
+function viewOf(room, role) {
+  if (room.type === 'splendor') return splendorViewFor(room, role);
+  if (room.type === 'bingo') return bingoViewFor(room, role);
+  return viewFor(room, role);
+}
 
 export async function POST(req) {
   if (!storeReady()) {
@@ -51,6 +64,51 @@ export async function POST(req) {
       if (!room) return NextResponse.json({ error: 'NOT_FOUND', message: '房間不存在或已過期' }, { status: 404 });
       const role = roleOf(room, token);
       if (!role) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 });
+
+      // 聊天：三種房型共用，任何階段都能發言（含終局後）
+      if (action === 'chat_send') {
+        try {
+          pushChat(room, role, payload?.text);
+        } catch (e) {
+          return NextResponse.json({ error: safeErrorCode(e) }, { status: 400 });
+        }
+        await guardedSetRoom(code, room);
+        return NextResponse.json({ view: withChat(viewOf(room, role), room, role) });
+      }
+
+      // 璀璨寶石房：伺服器端全權判定，前端只送意圖
+      if (room.type === 'splendor') {
+        if (!room.sp.players.home) return NextResponse.json({ error: 'NOT_STARTED', message: '對手尚未加入' }, { status: 409 });
+        try {
+          switch (action) {
+            case 'sp_take':
+              actSpTake(room, role, payload);
+              break;
+            case 'sp_buy':
+              actSpBuy(room, role, payload);
+              break;
+            case 'sp_reserve':
+              actSpReserve(room, role, payload);
+              break;
+            case 'sp_discard':
+              actSpDiscard(room, role, payload);
+              break;
+            case 'sp_noble':
+              actSpNoble(room, role, payload);
+              break;
+            case 'sp_rematch':
+              actSpRematch(room, role);
+              break;
+            default:
+              return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
+          }
+        } catch (e) {
+          return NextResponse.json({ error: safeErrorCode(e), view: withChat(splendorViewFor(room, role), room, role) }, { status: 409 });
+        }
+        await guardedSetRoom(code, room);
+        return NextResponse.json({ view: withChat(splendorViewFor(room, role), room, role) });
+      }
+
       // 賓果房：獨立的動作分派（無超時機制，輪到誰就等誰）
       if (room.type === 'bingo') {
         if (!room.bingo.players.home) return NextResponse.json({ error: 'NOT_STARTED', message: '對手尚未加入' }, { status: 409 });
@@ -80,10 +138,10 @@ export async function POST(req) {
         } catch (e) {
           // BOARD_CLASH 會重抽選項（房間有變動），錯誤路徑也要先存檔再回應
           await guardedSetRoom(code, room);
-          return NextResponse.json({ error: safeErrorCode(e), view: bingoViewFor(room, role) }, { status: 409 });
+          return NextResponse.json({ error: safeErrorCode(e), view: withChat(bingoViewFor(room, role), room, role) }, { status: 409 });
         }
         await guardedSetRoom(code, room);
-        return NextResponse.json({ view: bingoViewFor(room, role) });
+        return NextResponse.json({ view: withChat(bingoViewFor(room, role), room, role) });
       }
 
       if (!room.game) return NextResponse.json({ error: 'NOT_STARTED', message: '對手尚未加入' }, { status: 409 });
@@ -144,7 +202,7 @@ export async function POST(req) {
       }
 
       await guardedSetRoom(code, room);
-      return NextResponse.json({ view: viewFor(room, role) });
+      return NextResponse.json({ view: withChat(viewFor(room, role), room, role) });
     });
   } catch (e) {
     const info = errorResponseInfo(e);
