@@ -65,3 +65,39 @@ body {
   100% { transform: scale(1); opacity: 1; }
 }
 .animate-ping-once { animation: ping-once 0.18s ease-out; }
+
+/* 璀璨寶石：回合指示與「對手買得起」的箭頭輕微上下擺動 */
+@keyframes spBob {
+  0%, 100% { transform: translate(-50%, 0); }
+  50%      { transform: translate(-50%, 3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes spBob { 0%, 100% { transform: translate(-50%, 0); } }
+}
+
+/* 璀璨寶石：貴族登場特效 */
+@keyframes spNoblePop {
+  0%   { transform: scale(.5) rotate(-7deg); opacity: 0; }
+  55%  { transform: scale(1.09) rotate(2.5deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+@keyframes spRing {
+  0%   { transform: scale(.35); opacity: .85; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes spRays { to { transform: rotate(360deg); } }
+@keyframes spRise {
+  0%   { opacity: 0; transform: translateY(14px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes spSparkle {
+  0%   { transform: translate(0,0) scale(0); opacity: 0; }
+  35%  { opacity: 1; }
+  100% { transform: translate(var(--sx), var(--sy)) scale(1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes spNoblePop { 0%,100% { transform: none; opacity: 1; } }
+  @keyframes spRing { 0%,100% { opacity: 0; } }
+  @keyframes spRays { to { transform: none; } }
+  @keyframes spSparkle { 0%,100% { opacity: 0; } }
+}

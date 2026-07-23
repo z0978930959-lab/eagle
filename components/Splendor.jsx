@@ -62,6 +62,182 @@ const GEM_NAME = ['鑽石', '藍寶石', '綠寶石', '紅寶石', '瑪瑙'];
 const GEM_RING = ['#d8d4c8', '#3d7ec9', '#3f9b68', '#c9484f', '#5b5364'];
 const gemSrc = (k) => `/splendor/gems/${k}.png`;
 
+/* ---------------- 飛行動畫 ----------------
+ * 任何一方買牌／保留／拿寶石，都用「物件飛到該玩家區域」呈現，
+ * 讓對手的動作一眼看得出來（輪詢拿到新的 lastAction 就播一次）。
+ * -------------------------------------------------- */
+
+function useFlights() {
+  const [flights, setFlights] = useState([]);
+  const idRef = useRef(0);
+
+  const launch = useCallback((items) => {
+    const made = [];
+    const pick = (sel) => {
+      const list = Array.isArray(sel) ? sel : [sel];
+      for (const q of list) {
+        const el = document.querySelector(q);
+        if (el) return el;
+      }
+      return null;
+    };
+    items.forEach((it, k) => {
+      const from = pick(it.from);
+      const to = pick(it.to);
+      if (!from || !to) return;
+      const a = from.getBoundingClientRect();
+      const b = to.getBoundingClientRect();
+      if (!a.width || !b.width) return;
+      made.push({
+        id: ++idRef.current,
+        x0: a.left + a.width / 2,
+        y0: a.top + a.height / 2,
+        x1: b.left + b.width / 2,
+        y1: b.top + b.height / 2,
+        w: it.w,
+        h: it.h,
+        node: it.node,
+        delay: k * 100,
+      });
+    });
+    if (!made.length) return;
+    setFlights((f) => [...f, ...made]);
+    const ttl = 900 + made.length * 100;
+    setTimeout(() => setFlights((f) => f.filter((x) => !made.some((m) => m.id === x.id))), ttl);
+  }, []);
+
+  return [flights, launch];
+}
+
+function Ghost({ f }) {
+  const [go, setGo] = useState(false);
+  useEffect(() => {
+    let r2;
+    const r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => setGo(true));
+    });
+    return () => {
+      cancelAnimationFrame(r1);
+      if (r2) cancelAnimationFrame(r2);
+    };
+  }, []);
+  const dx = f.x1 - f.x0;
+  const dy = f.y1 - f.y0;
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: f.x0 - f.w / 2,
+        top: f.y0 - f.h / 2,
+        width: f.w,
+        height: f.h,
+        transform: go ? `translate(${dx}px, ${dy}px) scale(.5)` : 'translate(0,0) scale(1.06)',
+        opacity: go ? 0 : 1,
+        transition: `transform 640ms cubic-bezier(.32,.72,.26,1) ${f.delay}ms, opacity 300ms ease-in ${f.delay + 400}ms`,
+        filter: 'drop-shadow(0 8px 20px rgba(0,0,0,.75))',
+      }}
+    >
+      {f.node}
+    </div>
+  );
+}
+
+function FlightLayer({ flights }) {
+  if (!flights.length) return null;
+  return (
+    <div className="fixed inset-0 z-[95] pointer-events-none overflow-hidden">
+      {flights.map((f) => (
+        <Ghost key={f.id} f={f} />
+      ))}
+    </div>
+  );
+}
+
+/* 貴族登場：全畫面的登場演出，結束後才把貴族送進玩家區域 */
+function NobleEntrance({ fx, onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1750);
+    return () => clearTimeout(t);
+  }, [fx.id, onDone]);
+
+  const sparks = Array.from({ length: 14 }, (_, i) => {
+    const ang = (i / 14) * Math.PI * 2;
+    const dist = 120 + (i % 4) * 34;
+    return { x: Math.cos(ang) * dist, y: Math.sin(ang) * dist, d: (i % 7) * 55 };
+  });
+
+  return (
+    <div className="fixed inset-0 z-[96] pointer-events-none flex items-center justify-center overflow-hidden">
+      <div className="absolute inset-0 bg-black/55" style={{ animation: 'spRise 300ms ease-out both' }} />
+      <div
+        className="absolute w-[560px] h-[560px] rounded-full"
+        style={{
+          background: 'conic-gradient(from 0deg, transparent 0deg, rgba(245,207,106,.22) 12deg, transparent 26deg, transparent 60deg, rgba(245,207,106,.18) 72deg, transparent 88deg, transparent 130deg, rgba(245,207,106,.22) 142deg, transparent 158deg, transparent 200deg, rgba(245,207,106,.18) 212deg, transparent 228deg, transparent 280deg, rgba(245,207,106,.22) 292deg, transparent 308deg)',
+          animation: 'spRays 7s linear infinite',
+          maskImage: 'radial-gradient(circle, black 30%, transparent 72%)',
+          WebkitMaskImage: 'radial-gradient(circle, black 30%, transparent 72%)',
+        }}
+      />
+      <div className="absolute w-52 h-52 rounded-full border-2" style={{ borderColor: '#f5cf6a', animation: 'spRing 1.1s ease-out forwards' }} />
+      <div className="absolute w-52 h-52 rounded-full border" style={{ borderColor: '#f5cf6a99', animation: 'spRing 1.1s ease-out .22s forwards' }} />
+
+      {sparks.map((sp, i) => (
+        <span
+          key={i}
+          className="absolute w-1.5 h-1.5 rounded-full"
+          style={{
+            background: '#f5cf6a',
+            '--sx': `${sp.x}px`,
+            '--sy': `${sp.y}px`,
+            animation: `spSparkle 1.15s ease-out ${sp.d}ms forwards`,
+          }}
+        />
+      ))}
+
+      <div className="relative flex flex-col items-center">
+        <div
+          className="text-[11px] tracking-[0.55em] mb-3 pl-[0.55em]"
+          style={{ color: '#f5cf6a', animation: 'spRise 420ms ease-out 180ms both' }}
+        >
+          貴族來訪
+        </div>
+        <div
+          className="rounded-2xl overflow-hidden border-2 shadow-2xl"
+          style={{
+            borderColor: '#f5cf6a',
+            width: 190,
+            height: 190,
+            boxShadow: '0 0 60px -6px rgba(245,207,106,.7), 0 20px 50px rgba(0,0,0,.8)',
+            animation: 'spNoblePop 640ms cubic-bezier(.22,1.2,.36,1) both',
+          }}
+        >
+          <img src={`/splendor/noble/${fx.img}.jpg`} alt="" className="w-full h-full object-cover" />
+        </div>
+        <div className="mt-4 text-center" style={{ animation: 'spRise 420ms ease-out 380ms both' }}>
+          <div className="font-display text-2xl font-black" style={{ color: '#f5cf6a', textShadow: '0 2px 12px rgba(0,0,0,.9)' }}>
+            {fx.who}
+          </div>
+          <div className="font-display font-black text-4xl mt-1" style={{ color: '#f5cf6a', textShadow: '0 0 22px rgba(245,207,106,.55)' }}>
+            +3
+            <span className="text-sm font-mono-tc ml-1" style={{ color: '#f5cf6aaa' }}>
+              pts
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 飛行中的牌背（暗抽的卡不揭露內容）
+function CardBack({ lv }) {
+  return (
+    <div className="w-full h-full rounded-lg border border-field-chalk/25 bg-[repeating-linear-gradient(135deg,#1c1730_0_5px,#241d3c_5px_10px)] flex items-center justify-center">
+      <Stars lv={lv} size="text-xs" />
+    </div>
+  );
+}
+
 /* ---------------- 小元件 ---------------- */
 
 // 寶石圖示（附圖切出的六色素材）
@@ -119,19 +295,31 @@ function Pts({ n, big }) {
 
 /* ---------------- 發展卡 ---------------- */
 
-function DevCard({ card, affordable, onClick, disabled, compact }) {
+function DevCard({ card, affordable, oppAfford, onClick, disabled, compact, flyId }) {
   if (!card) {
     return <div className="rounded-lg border border-dashed border-field-chalk/12 bg-black/20 aspect-[5/7]" />;
   }
   const costs = card.cost.map((n, i) => (n ? { i, n } : null)).filter(Boolean);
   return (
     <button
+      data-fly={flyId}
       onClick={onClick}
       disabled={disabled}
-      className={`group relative rounded-lg overflow-hidden aspect-[5/7] w-full text-left transition-all border
-        ${affordable ? 'border-field-floodlight/70 shadow-[0_0_14px_-4px_rgba(255,233,168,.55)]' : 'border-field-chalk/18'}
-        ${disabled ? 'cursor-default opacity-80' : 'hover:-translate-y-1 hover:border-field-floodlight active:translate-y-0'}`}
+      style={affordable ? { borderColor: '#f5cf6a', boxShadow: '0 0 0 1px #f5cf6a55, 0 0 18px -4px rgba(245,207,106,.75)' } : undefined}
+      className={`group relative rounded-lg overflow-hidden aspect-[5/7] w-full text-left transition-all
+        ${affordable ? 'border-2' : 'border border-field-chalk/18'}
+        ${disabled ? 'cursor-default opacity-80' : 'hover:-translate-y-1 active:translate-y-0'}`}
     >
+      {/* 對手買得起：卡片上方一個小紅箭頭 */}
+      {oppAfford && (
+        <span
+          className="absolute top-0 left-1/2 -translate-x-1/2 z-20 leading-none pointer-events-none"
+          style={{ fontSize: 13, color: '#ff5a5a', textShadow: '0 1px 3px rgba(0,0,0,.9)', animation: 'spBob 1.1s ease-in-out infinite' }}
+          title="對手目前買得起這張"
+        >
+          ▼
+        </span>
+      )}
       <img
         src={`/splendor/dev/${card.img}.jpg`}
         alt=""
@@ -166,9 +354,10 @@ function DevCard({ card, affordable, onClick, disabled, compact }) {
 
 /* ---------------- 貴族 ---------------- */
 
-function NobleTile({ noble, onClick, selectable }) {
+function NobleTile({ noble, onClick, selectable, flyId }) {
   return (
     <button
+      data-fly={flyId}
       onClick={onClick}
       disabled={!selectable}
       className={`relative rounded-lg overflow-hidden w-[76px] h-[76px] shrink-0 border transition-all
@@ -198,7 +387,7 @@ function NobleTile({ noble, onClick, selectable }) {
 
 /* ---------------- 玩家面板 ---------------- */
 
-function Seat({ p, name, active, isMe, res, onBuyRes, discardMode, onDiscard, winPoints }) {
+function Seat({ p, name, active, isMe, res, onBuyRes, discardMode, onDiscard, winPoints, role }) {
   if (!p) {
     return (
       <div className="rounded-xl border border-dashed border-field-chalk/15 bg-black/20 p-3 text-center text-xs text-field-chalk/35">
@@ -208,12 +397,22 @@ function Seat({ p, name, active, isMe, res, onBuyRes, discardMode, onDiscard, wi
   }
   return (
     <div
-      className={`rounded-xl border p-3 transition-colors ${
+      data-fly={role ? `seat-${role}` : undefined}
+      className={`relative rounded-xl border p-3 transition-colors ${
         active ? 'border-field-floodlight/70 bg-field-floodlight/[0.06]' : 'border-field-chalk/15 bg-black/30'
       }`}
     >
       <div className="flex items-baseline justify-between mb-2">
-        <span className="text-sm tracking-wider text-field-chalk/85">
+        <span className="text-sm tracking-wider text-field-chalk/85 relative">
+          {/* 輪到誰：名字上方的箭頭 */}
+          {active && (
+            <span
+              className="absolute -top-[18px] left-1/2 -translate-x-1/2 leading-none whitespace-nowrap"
+              style={{ color: '#f5cf6a', fontSize: 15, textShadow: '0 0 10px rgba(245,207,106,.6)', animation: 'spBob 1.1s ease-in-out infinite' }}
+            >
+              ▼
+            </span>
+          )}
           {name}
           {isMe && <span className="text-[10px] text-field-chalk/40 ml-1">（你）</span>}
         </span>
@@ -273,7 +472,15 @@ function Seat({ p, name, active, isMe, res, onBuyRes, discardMode, onDiscard, wi
           res?.length ? (
             <div className="grid grid-cols-3 gap-1.5 max-w-[190px]">
               {res.map((c, i) => (
-                <DevCard key={c.id} card={c} compact affordable={onBuyRes?.can?.[i]} onClick={() => onBuyRes?.open(i)} disabled={!onBuyRes} />
+                <DevCard
+                  key={c.id}
+                  card={c}
+                  compact
+                  flyId={`res-${role}-${i}`}
+                  affordable={onBuyRes?.can?.[i]}
+                  onClick={() => onBuyRes?.open(i)}
+                  disabled={!onBuyRes}
+                />
               ))}
             </div>
           ) : (
@@ -429,6 +636,9 @@ export default function Splendor() {
   const [busy, setBusy] = useState(false);
   const [lobbyErr, setLobbyErr] = useState('');
   const pollRef = useRef(null);
+  const [flights, launch] = useFlights();
+  const seqRef = useRef(0);
+  const [nobleFx, setNobleFx] = useState(null); // 貴族登場演出
 
   // 還原上次的對局
   useEffect(() => {
@@ -459,6 +669,69 @@ export default function Splendor() {
     pollRef.current = setInterval(refresh, period);
     return () => clearInterval(pollRef.current);
   }, [session, refresh, view?.myTurn]);
+
+  // 任何一方的動作都會帶回一個新的 lastAction；序號變大就播放飛行動畫
+  useEffect(() => {
+    const all = view?.recentActions || [];
+    const fresh = all.filter((a) => a.seq > seqRef.current).sort((a, b) => a.seq - b.seq);
+    if (!fresh.length) return;
+    const isFirst = seqRef.current === 0;
+    seqRef.current = Math.max(...all.map((a) => a.seq));
+    if (isFirst) return; // 剛進場不補播歷史動作
+
+    const items = [];
+    for (const la of fresh) {
+    const seat = `[data-fly="seat-${la.by}"]`;
+
+    if (la.kind === 'take') {
+      la.gems.forEach((g) => items.push({ from: `[data-fly="bank-${g}"]`, to: seat, w: 30, h: 30, node: <Gem idx={g} size={30} /> }));
+    } else if (la.kind === 'discard') {
+      // 放回：方向相反
+      const g = la.gem;
+      items.push({
+        from: seat,
+        to: g === 'gold' ? '[data-fly="bank-gold"]' : `[data-fly="bank-${g}"]`,
+        w: 30,
+        h: 30,
+        node: <Gem idx={g} size={30} />,
+      });
+    } else if (la.kind === 'buy' || la.kind === 'reserve') {
+      const from =
+        la.from === 'deck'
+          ? `[data-fly="deck-${la.lv}"]`
+          : la.from === 'reserve'
+            ? [`[data-fly="res-${la.by}-${la.resIdx}"]`, seat]
+            : `[data-fly="slot-${la.lv}-${la.slot}"]`;
+      items.push({
+        from,
+        to: seat,
+        w: 66,
+        h: 92,
+        node: la.card ? (
+          <div className="w-full h-full">
+            <DevCard card={la.card} compact disabled />
+          </div>
+        ) : (
+          <CardBack lv={la.lv} />
+        ),
+      });
+      if (la.kind === 'reserve' && la.gotGold) {
+        items.push({ from: '[data-fly="bank-gold"]', to: seat, w: 30, h: 30, node: <Gem idx="gold" size={30} /> });
+      }
+    } else if (la.kind === 'noble') {
+      // 貴族值得一個大場面：全畫面登場，結束後才送進該玩家區域
+      setNobleFx({
+        id: la.seq,
+        img: la.img,
+        idx: la.idx,
+        by: la.by,
+        who: la.by === view.role ? '為你效力' : '投向對手',
+      });
+    }
+    }
+
+    if (items.length) launch(items);
+  }, [view?.lastAction?.seq, launch]);
 
   function enter(code, token, v) {
     saveSession(code, token);
@@ -576,7 +849,13 @@ export default function Splendor() {
           <div className="text-[10px] tracking-[0.25em] text-field-chalk/35 mb-1.5">貴族　·　各 3 分</div>
           <div className="flex gap-2 flex-wrap">
             {v.nobles.map((n, i) => (
-              <NobleTile key={i} noble={n} selectable={nobleMode && v.nobleChoices.includes(i)} onClick={() => act('sp_noble', { idx: i })} />
+              <NobleTile
+                key={i}
+                noble={n}
+                flyId={`noble-${i}`}
+                selectable={nobleMode && v.nobleChoices.includes(i)}
+                onClick={() => act('sp_noble', { idx: i })}
+              />
             ))}
           </div>
         </div>
@@ -587,6 +866,7 @@ export default function Splendor() {
             {[3, 2, 1].map((lv) => {
               const row = v.board[lv - 1];
               const afford = v.affordable?.board?.[lv - 1] || [];
+              const oppAfford = v.affordable?.oppBoard?.[lv - 1] || [];
               return (
                 <div
                   key={lv}
@@ -606,6 +886,7 @@ export default function Splendor() {
                   <div className="flex gap-2">
                     {/* 牌堆：可暗抽保留 */}
                     <button
+                      data-fly={`deck-${lv}`}
                       disabled={!myTurn || discardMode || nobleMode || busy || !v.deckCounts[lv - 1] || v.me.res.length >= 3}
                       onClick={() => act('sp_reserve', { from: 'deck', lv })}
                       title="暗抽這疊最上面一張來保留"
@@ -619,7 +900,9 @@ export default function Splendor() {
                         <DevCard
                           key={c ? c.id : `e${j}`}
                           card={c}
+                          flyId={`slot-${lv}-${j}`}
                           affordable={afford[j]}
+                          oppAfford={oppAfford[j]}
                           disabled={!myTurn || discardMode || nobleMode || busy || !c}
                           onClick={() => setModal({ kind: 'card', card: c, from: 'board', lv, slot: j, afford: afford[j] })}
                         />
@@ -640,6 +923,7 @@ export default function Splendor() {
                 return (
                   <button
                     key={i}
+                    data-fly={`bank-${i}`}
                     onClick={() => toggleGem(i)}
                     disabled={!myTurn || discardMode || nobleMode || busy || n <= 0}
                     className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-40
@@ -652,7 +936,7 @@ export default function Splendor() {
                   </button>
                 );
               })}
-              <div className="flex items-center gap-2.5 px-2 py-1.5 opacity-70">
+              <div data-fly="bank-gold" className="flex items-center gap-2.5 px-2 py-1.5 opacity-70">
                 <Gem idx="gold" size={26} />
                 <span className="text-[11px] text-field-chalk/45 flex-1 text-left">黃金（保留時取得）</span>
                 <span className="font-mono-tc text-sm text-field-chalk/70">{v.gold}</span>
@@ -684,6 +968,7 @@ export default function Splendor() {
             p={v.me}
             res={v.me.res}
             name={meName}
+            role={v.role}
             isMe
             active={myTurn || discardMode || nobleMode}
             winPoints={v.winPoints}
@@ -695,7 +980,13 @@ export default function Splendor() {
                 : null
             }
           />
-          <Seat p={v.opp} name={oppName} active={!myTurn && v.phase !== 'over'} winPoints={v.winPoints} />
+          <Seat
+            p={v.opp}
+            name={oppName}
+            role={v.role === 'away' ? 'home' : 'away'}
+            active={!myTurn && v.phase !== 'over'}
+            winPoints={v.winPoints}
+          />
         </div>
 
         {/* 戰報 */}
@@ -786,7 +1077,32 @@ export default function Splendor() {
         </div>
       )}
 
+      {nobleFx && (
+        <NobleEntrance
+          fx={nobleFx}
+          onDone={() => {
+            launch([
+              {
+                from: `[data-fly="noble-${nobleFx.idx}"]`,
+                to: `[data-fly="seat-${nobleFx.by}"]`,
+                w: 76,
+                h: 76,
+                node: (
+                  <img
+                    src={`/splendor/noble/${nobleFx.img}.jpg`}
+                    alt=""
+                    className="w-full h-full object-cover rounded-lg border-2"
+                    style={{ borderColor: '#f5cf6a' }}
+                  />
+                ),
+              },
+            ]);
+            setNobleFx(null);
+          }}
+        />
+      )}
       <Chat code={session.code} token={session.token} chat={v.chat} role={v.chatRole} labels={labels} onView={setView} />
+      <FlightLayer flights={flights} />
     </div>
   );
 }
