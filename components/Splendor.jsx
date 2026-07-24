@@ -156,7 +156,7 @@ function FlightLayer({ flights }) {
 /* 貴族登場：全畫面的登場演出，結束後才把貴族送進玩家區域 */
 function NobleEntrance({ fx, onDone }) {
   useEffect(() => {
-    const t = setTimeout(onDone, 1750);
+    const t = setTimeout(onDone, 3000);
     return () => clearTimeout(t);
   }, [fx.id, onDone]);
 
@@ -352,7 +352,147 @@ function DevCard({ card, affordable, oppAfford, onClick, disabled, compact, flyI
   );
 }
 
+/* 購買預覽：算出這張卡會扣掉哪些寶石（與伺服器同一套算法） */
+function previewPayment(me, card) {
+  const pay = [0, 0, 0, 0, 0];
+  let need = 0;
+  for (let i = 0; i < 5; i++) {
+    const c = Math.max(0, card.cost[i] - me.bonus[i]);
+    pay[i] = Math.min(c, me.tok[i]);
+    need += c - pay[i];
+  }
+  return { pay, gold: need, ok: need <= me.gold };
+}
+
+// 購買前先看清楚：花掉的變灰，剩下的維持原色
+function PaymentPreview({ me, card }) {
+  const pm = previewPayment(me, card);
+  const rows = [];
+  for (let i = 0; i < 5; i++) {
+    if (me.tok[i] > 0 || pm.pay[i] > 0) rows.push({ i, own: me.tok[i], spend: pm.pay[i], bonus: me.bonus[i] });
+  }
+  const goldRow = me.gold > 0 || pm.gold > 0 ? { own: me.gold, spend: pm.gold } : null;
+
+  return (
+    <div className="rounded-xl border border-field-chalk/15 bg-black/35 p-2.5 text-left">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] tracking-[0.2em] text-field-chalk/40">購買後剩餘</span>
+        <span className="text-[9px] text-field-chalk/30">灰色＝將被扣除</span>
+      </div>
+
+      {rows.length === 0 && !goldRow && <div className="text-[11px] text-field-chalk/30">目前沒有持有寶石</div>}
+
+      <div className="space-y-1.5">
+        {rows.map(({ i, own, spend, bonus }) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <Gem idx={i} size={17} />
+            {bonus > 0 && <span className="font-mono-tc text-[9px] text-[#f5cf6a99] w-7">折{bonus}</span>}
+            {bonus === 0 && <span className="w-7" />}
+            <div className="flex gap-[3px] flex-wrap flex-1">
+              {Array.from({ length: own }).map((_, k) => (
+                <span key={k} className={k < spend ? 'grayscale opacity-25' : ''}>
+                  <Gem idx={i} size={15} />
+                </span>
+              ))}
+            </div>
+            <span className={`font-mono-tc text-[11px] ${spend > 0 ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
+              {own - spend}
+            </span>
+          </div>
+        ))}
+
+        {goldRow && (
+          <div className="flex items-center gap-1.5 pt-1.5 border-t border-field-chalk/10">
+            <Gem idx="gold" size={17} />
+            <span className="w-7" />
+            <div className="flex gap-[3px] flex-wrap flex-1">
+              {Array.from({ length: goldRow.own }).map((_, k) => (
+                <span key={k} className={k < goldRow.spend ? 'grayscale opacity-25' : ''}>
+                  <Gem idx="gold" size={15} />
+                </span>
+              ))}
+            </div>
+            <span className={`font-mono-tc text-[11px] ${goldRow.spend > 0 ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
+              {goldRow.own - goldRow.spend}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- 貴族 ---------------- */
+
+// 左側常駐用的迷你貴族：只顯示達成進度
+function MiniNoble({ noble, myBonus }) {
+  const reqs = noble.req.map((v, i) => (v ? { i, v } : null)).filter(Boolean);
+  const done = reqs.every((r) => (myBonus?.[r.i] || 0) >= r.v);
+  return (
+    <div className={`flex items-center gap-1.5 ${noble.taken ? 'opacity-25' : ''}`}>
+      <img
+        src={`/splendor/noble/${noble.img}.jpg`}
+        alt=""
+        className="w-8 h-8 rounded object-cover border shrink-0"
+        style={{ borderColor: done && !noble.taken ? '#f5cf6a' : '#ffffff22' }}
+      />
+      <div className="flex flex-wrap gap-x-1 gap-y-0.5">
+        {reqs.map(({ i, v }) => {
+          const have = myBonus?.[i] || 0;
+          return (
+            <span key={i} className="flex items-center gap-[2px]">
+              <Gem idx={i} size={11} />
+              <span className={`font-mono-tc text-[9px] leading-none ${have >= v ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
+                {Math.min(have, v)}/{v}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// 上方主要的貴族卡：放大，並列出雙方各色現有數
+function NobleCard({ noble, myBonus, oppBonus, onClick, selectable, flyId }) {
+  const reqs = noble.req.map((v, i) => (v ? { i, v } : null)).filter(Boolean);
+  return (
+    <button
+      data-fly={flyId}
+      onClick={onClick}
+      disabled={!selectable}
+      className={`flex gap-2.5 items-stretch rounded-xl overflow-hidden border p-2 text-left transition-all bg-black/30
+        ${noble.taken ? 'opacity-30 grayscale border-field-chalk/15' : 'border-[#d6b153]/60'}
+        ${selectable ? 'ring-2 ring-field-floodlight hover:scale-[1.03] cursor-pointer' : 'cursor-default'}`}
+    >
+      <div className="relative w-[74px] h-[74px] shrink-0 rounded-lg overflow-hidden">
+        <img src={`/splendor/noble/${noble.img}.jpg`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        <span className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+        <span className="absolute bottom-0.5 left-1">
+          <Pts n={3} />
+        </span>
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="text-[9px] tracking-[0.2em] text-field-chalk/35 mb-1">入場條件</div>
+        <div className="space-y-[3px]">
+          {reqs.map(({ i, v }) => {
+            const mine = myBonus?.[i] || 0;
+            const opp = oppBonus?.[i] || 0;
+            return (
+              <div key={i} className="flex items-center gap-1.5">
+                <Gem idx={i} size={15} />
+                <span className="font-mono-tc text-[11px] text-field-chalk/80 w-4">{v}</span>
+                <span className={`font-mono-tc text-[10px] ${mine >= v ? 'text-[#f5cf6a]' : 'text-field-chalk/40'}`}>你 {mine}</span>
+                <span className={`font-mono-tc text-[10px] ${opp >= v ? 'text-[#ff7a7a]' : 'text-field-chalk/30'}`}>敵 {opp}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </button>
+  );
+}
 
 function NobleTile({ noble, onClick, selectable, flyId }) {
   return (
@@ -637,7 +777,7 @@ export default function Splendor() {
   const [lobbyErr, setLobbyErr] = useState('');
   const pollRef = useRef(null);
   const [flights, launch] = useFlights();
-  const seqRef = useRef(0);
+  const playedRef = useRef(null); // null = 尚未初始化；Set = 已播過的動作序號
   const [nobleFx, setNobleFx] = useState(null); // 貴族登場演出
 
   // 還原上次的對局
@@ -673,11 +813,22 @@ export default function Splendor() {
   // 任何一方的動作都會帶回一個新的 lastAction；序號變大就播放飛行動畫
   useEffect(() => {
     const all = view?.recentActions || [];
-    const fresh = all.filter((a) => a.seq > seqRef.current).sort((a, b) => a.seq - b.seq);
+
+    // 第一次拿到狀態：把當下已存在的動作全部標記為「看過了」，不補播歷史
+    if (playedRef.current === null) {
+      playedRef.current = new Set(all.map((a) => a.seq));
+      return;
+    }
+
+    const played = playedRef.current;
+    const fresh = all.filter((a) => !played.has(a.seq)).sort((a, b) => a.seq - b.seq);
     if (!fresh.length) return;
-    const isFirst = seqRef.current === 0;
-    seqRef.current = Math.max(...all.map((a) => a.seq));
-    if (isFirst) return; // 剛進場不補播歷史動作
+    fresh.forEach((a) => played.add(a.seq));
+    // 集合只留最近的序號，避免無限長大
+    if (played.size > 40) {
+      const keep = [...played].sort((x, y) => y - x).slice(0, 20);
+      playedRef.current = new Set(keep);
+    }
 
     const items = [];
     for (const la of fresh) {
@@ -731,7 +882,7 @@ export default function Splendor() {
     }
 
     if (items.length) launch(items);
-  }, [view?.lastAction?.seq, launch]);
+  }, [view, launch]);
 
   function enter(code, token, v) {
     saveSession(code, token);
@@ -741,6 +892,7 @@ export default function Splendor() {
   }
 
   function leave() {
+    playedRef.current = null;
     clearSession();
     setSession(null);
     setView(null);
@@ -830,7 +982,46 @@ export default function Splendor() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#171226] via-[#120f1e] to-[#0a0810] pb-24">
-      <div className="max-w-5xl mx-auto px-3 sm:px-5 pt-4">
+      {/* 左側常駐面板：捲動時也看得到貴族進度與自己的寶石 */}
+      <aside className="hidden xl:flex fixed left-3 top-16 z-40 w-[176px] flex-col gap-3">
+        <div className="rounded-xl border border-[#d6b153]/35 bg-[#0d0a18]/92 backdrop-blur p-2.5">
+          <div className="text-[9px] tracking-[0.25em] text-field-chalk/35 mb-2">貴族進度</div>
+          <div className="space-y-2">
+            {v.nobles.map((n, i) => (
+              <MiniNoble key={i} noble={n} myBonus={v.me?.bonus} />
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-field-chalk/18 bg-[#0d0a18]/92 backdrop-blur p-2.5">
+          <div className="text-[9px] tracking-[0.25em] text-field-chalk/35 mb-2">你的寶石</div>
+          <div className="space-y-1.5">
+            {v.me.tok.map((n, i) => (
+              <div key={i} className={`flex items-center gap-2 ${n ? '' : 'opacity-30'}`}>
+                <Gem idx={i} size={20} />
+                <span className="font-mono-tc text-[11px] text-field-chalk/80 w-4">{n}</span>
+                <span className="font-mono-tc text-[9px] text-[#f5cf6a99]">折{v.me.bonus[i]}</span>
+              </div>
+            ))}
+            <div className={`flex items-center gap-2 pt-1.5 border-t border-field-chalk/10 ${v.me.gold ? '' : 'opacity-30'}`}>
+              <Gem idx="gold" size={20} />
+              <span className="font-mono-tc text-[11px] text-field-chalk/80 w-4">{v.me.gold}</span>
+            </div>
+          </div>
+          <div className="mt-2 pt-2 border-t border-field-chalk/10 flex items-baseline justify-between">
+            <span className="text-[9px] text-field-chalk/35">持有</span>
+            <span
+              className={`font-mono-tc text-[11px] ${
+                v.me.tok.reduce((a, b) => a + b, 0) + v.me.gold >= 10 ? 'text-[#ff7a7a]' : 'text-field-chalk/60'
+              }`}
+            >
+              {v.me.tok.reduce((a, b) => a + b, 0) + v.me.gold}/10
+            </span>
+          </div>
+        </div>
+      </aside>
+
+      <div className="max-w-5xl mx-auto px-3 sm:px-5 pt-4 xl:pl-[196px]">
         {/* 頂列 */}
         <div className="flex items-center justify-between gap-3 pb-3 mb-4 border-b border-field-chalk/12">
           <div className="flex items-baseline gap-3">
@@ -846,13 +1037,15 @@ export default function Splendor() {
 
         {/* 貴族 */}
         <div className="mb-4">
-          <div className="text-[10px] tracking-[0.25em] text-field-chalk/35 mb-1.5">貴族　·　各 3 分</div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="text-[10px] tracking-[0.25em] text-field-chalk/35 mb-1.5">貴族　·　各 3 分　·　達成即自動來訪</div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {v.nobles.map((n, i) => (
-              <NobleTile
+              <NobleCard
                 key={i}
                 noble={n}
                 flyId={`noble-${i}`}
+                myBonus={v.me?.bonus}
+                oppBonus={v.opp?.bonus}
                 selectable={nobleMode && v.nobleChoices.includes(i)}
                 onClick={() => act('sp_noble', { idx: i })}
               />
@@ -1008,7 +1201,7 @@ export default function Splendor() {
       {/* 卡片動作 */}
       {modal?.kind === 'card' && modal.card && (
         <div className="fixed inset-0 z-[75] bg-black/80 flex items-center justify-center p-5" onClick={() => setModal(null)}>
-          <div className="w-full max-w-xs rounded-2xl border border-field-chalk/20 bg-[#141024] p-5 text-center" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-2xl border border-field-chalk/20 bg-[#141024] p-5 text-center" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-center mb-3">
               <div className="w-28">
                 <DevCard card={modal.card} affordable={modal.afford} disabled />
@@ -1018,8 +1211,11 @@ export default function Splendor() {
               {GEM_NAME[modal.card.col]}獎勵
               {modal.card.pv ? `　·　${modal.card.pv} 分` : ''}
             </div>
-            <div className="text-[11px] text-field-chalk/40 mb-4">
+            <div className="text-[11px] text-field-chalk/40 mb-3">
               花費　{modal.card.cost.map((n, i) => (n ? `${n} ${GEM_NAME[i]}` : '')).filter(Boolean).join('、')}
+            </div>
+            <div className="mb-4">
+              <PaymentPreview me={v.me} card={modal.card} />
             </div>
             <div className="flex flex-col gap-2">
               <button
