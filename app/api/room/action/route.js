@@ -1,4 +1,4 @@
-import { actSpTake, actSpBuy, actSpReserve, actSpDiscard, actSpNoble, actSpRematch, actSpCoin, splendorViewFor } from '../../../../lib/splendorLogic';
+import { actSpTake, actSpBuy, actSpReserve, actSpDiscard, actSpNoble, actSpRematch, actSpCoin, actSpSurrender, splendorViewFor } from '../../../../lib/splendorLogic';
 import { pushChat, chatOf } from '../../../../lib/chat';
 import { actBingoChoose, actBingoRps, actBingoMark, actBingoAnnounce, actBingoDrawOffer, actBingoDrawRespond, bingoViewFor } from '../../../../lib/bingoLogic';
 import { NextResponse } from 'next/server';
@@ -99,6 +99,9 @@ export async function POST(req) {
               break;
             case 'sp_coin':
               actSpCoin(room, role, payload);
+              break;
+            case 'sp_surrender':
+              actSpSurrender(room, role);
               break;
             case 'sp_rematch':
               actSpRematch(room, role);

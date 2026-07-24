@@ -851,6 +851,7 @@ export default function Splendor() {
   const playedRef = useRef(null); // null = 尚未初始化；Set = 已播過的動作序號
   const [nobleFx, setNobleFx] = useState(null); // 貴族登場演出
   const [coinDone, setCoinDone] = useState(false); // 猜金幣結果是否已看完
+  const [confirmSurrender, setConfirmSurrender] = useState(false);
 
   // 還原上次的對局
   useEffect(() => {
@@ -1288,9 +1289,19 @@ export default function Splendor() {
           </div>
         )}
 
-        <button onClick={leave} className="mt-6 text-field-chalk/30 text-[11px] underline underline-offset-4 hover:text-field-chalk/60">
-          離開房間
-        </button>
+        <div className="mt-6 flex items-center gap-4">
+          <button onClick={leave} className="text-field-chalk/30 text-[11px] underline underline-offset-4 hover:text-field-chalk/60">
+            離開房間
+          </button>
+          {v.phase !== 'over' && (
+            <button
+              onClick={() => setConfirmSurrender(true)}
+              className="px-3 py-1.5 rounded-lg border border-red-400/35 text-red-300/70 text-[11px] tracking-wider hover:border-red-400/70 hover:text-red-300 transition-colors"
+            >
+              🏳️ 投降
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 卡片動作 */}
@@ -1340,24 +1351,107 @@ export default function Splendor() {
         </div>
       )}
 
-      {/* 終局 */}
+      {/* 投降確認 */}
+      {confirmSurrender && v.phase !== 'over' && (
+        <div className="fixed inset-0 z-[78] bg-black/80 flex items-center justify-center p-5" onClick={() => setConfirmSurrender(false)}>
+          <div className="w-full max-w-xs rounded-2xl border border-red-400/30 bg-[#180f14] p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="text-4xl mb-3">🏳️</div>
+            <div className="font-display text-xl font-bold text-field-chalk/90 mb-2">確定要投降嗎？</div>
+            <div className="text-[11px] text-field-chalk/45 leading-relaxed mb-5">
+              這局立刻結束，對手直接獲勝。
+              <br />
+              可以按「再來一局」重新開始。
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setConfirmSurrender(false);
+                  act('sp_surrender');
+                }}
+                disabled={busy}
+                className="py-2.5 rounded-xl border border-red-400/60 bg-red-500/10 text-red-300 text-sm tracking-widest hover:bg-red-500/20 disabled:opacity-40"
+              >
+                投降認輸
+              </button>
+              <button onClick={() => setConfirmSurrender(false)} className="py-2 text-field-chalk/45 text-xs">
+                再撐一下
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 終局結算 */}
       {v.phase === 'over' && (
-        <div className="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-6">
-          <div className="w-full max-w-sm rounded-2xl border border-field-chalk/20 bg-[#141024] p-7 text-center">
-            <div className="font-display text-3xl font-black mb-2" style={{ color: '#f5cf6a' }}>
-              {v.winner === 'draw' ? '平手' : v.winner === v.role ? '你獲勝了' : '對手獲勝'}
+        <div className="fixed inset-0 z-[70] bg-black/88 flex items-center justify-center p-5 overflow-y-auto">
+          <div className="w-full max-w-sm my-auto rounded-2xl border border-field-chalk/20 bg-[#141024] p-5 text-center">
+            {(() => {
+              const surrendered = v.endReason === 'surrender';
+              const title = surrendered
+                ? v.iSurrendered
+                  ? '你投降了'
+                  : '對手投降了'
+                : v.winner === 'draw'
+                  ? '平手'
+                  : v.winner === v.role
+                    ? '你獲勝了'
+                    : '對手獲勝';
+              const sub = surrendered
+                ? v.iSurrendered
+                  ? '棄子認輸，下一局再算帳'
+                  : '對手舉了白旗，這局歸你'
+                : v.winner === 'draw'
+                  ? '分數與卡數完全相同'
+                  : '十五分達成';
+              return (
+                <>
+                  <img
+                    src={surrendered ? '/splendor/end/surrender.jpg' : '/splendor/end/victory.jpg'}
+                    alt=""
+                    className="mx-auto rounded-xl border border-field-chalk/15 max-h-[38vh] w-auto object-contain mb-4"
+                  />
+                  <div
+                    className="font-display text-3xl font-black mb-1"
+                    style={{ color: surrendered ? '#ff8a8a' : '#f5cf6a' }}
+                  >
+                    {title}
+                  </div>
+                  <div className="text-[11px] text-field-chalk/40 mb-4">{sub}</div>
+                </>
+              );
+            })()}
+
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {[
+                { label: '你', p: v.me, win: v.winner === v.role },
+                { label: '對手', p: v.opp, win: v.winner && v.winner !== 'draw' && v.winner !== v.role },
+              ].map(({ label, p, win }) => (
+                <div
+                  key={label}
+                  className={`rounded-xl border p-2.5 ${win ? 'border-[#f5cf6a]/60 bg-[#f5cf6a]/[0.07]' : 'border-field-chalk/12 bg-black/25'}`}
+                >
+                  <div className="text-[10px] text-field-chalk/40 mb-1">{label}</div>
+                  <div className="font-display font-black text-2xl" style={{ color: win ? '#f5cf6a' : '#e9e6df99' }}>
+                    {p.pts}
+                    <span className="text-[10px] font-mono ml-0.5" style={{ color: '#f5cf6a80' }}>
+                      pts
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-field-chalk/35 mt-0.5">
+                    {p.cards} 張卡　·　{p.nobles} 貴族
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="text-xs text-field-chalk/50 leading-relaxed mb-5">
-              你 {v.me.pts} 分／{v.me.cards} 張卡
-              <br />
-              對手 {v.opp.pts} 分／{v.opp.cards} 張卡
-              <br />
-              <span className="text-field-chalk/30">同分時買卡較少者勝</span>
-            </div>
+
+            {v.endReason !== 'surrender' && (
+              <div className="text-[10px] text-field-chalk/25 mb-4">同分時買卡較少者勝</div>
+            )}
+
             <button
               onClick={() => act('sp_rematch')}
               disabled={busy}
-              className="w-full py-2.5 rounded-xl border border-field-floodlight/60 text-field-floodlight text-sm tracking-widest hover:bg-field-floodlight/15"
+              className="w-full py-2.5 rounded-xl border border-field-floodlight/60 text-field-floodlight text-sm tracking-widest hover:bg-field-floodlight/15 disabled:opacity-40"
             >
               {v.rematch?.[v.role] ? '等待對手同意…' : '再來一局'}
             </button>
