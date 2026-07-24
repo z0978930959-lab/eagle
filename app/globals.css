@@ -101,3 +101,18 @@ body {
   @keyframes spRays { to { transform: none; } }
   @keyframes spSparkle { 0%,100% { opacity: 0; } }
 }
+
+/* 璀璨寶石：猜金幣 */
+@keyframes spCoinSpin {
+  0%   { transform: rotateY(0deg) translateY(0); }
+  50%  { transform: rotateY(900deg) translateY(-26px); }
+  100% { transform: rotateY(1800deg) translateY(0); }
+}
+@keyframes spCoinIdle {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50%      { transform: translateY(-7px) rotate(4deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes spCoinSpin { 0%,100% { transform: none; } }
+  @keyframes spCoinIdle { 0%,100% { transform: none; } }
+}

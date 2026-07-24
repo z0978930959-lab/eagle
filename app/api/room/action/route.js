@@ -1,4 +1,4 @@
-import { actSpTake, actSpBuy, actSpReserve, actSpDiscard, actSpNoble, actSpRematch, splendorViewFor } from '../../../../lib/splendorLogic';
+import { actSpTake, actSpBuy, actSpReserve, actSpDiscard, actSpNoble, actSpRematch, actSpCoin, splendorViewFor } from '../../../../lib/splendorLogic';
 import { pushChat, chatOf } from '../../../../lib/chat';
 import { actBingoChoose, actBingoRps, actBingoMark, actBingoAnnounce, actBingoDrawOffer, actBingoDrawRespond, bingoViewFor } from '../../../../lib/bingoLogic';
 import { NextResponse } from 'next/server';
@@ -70,7 +70,8 @@ export async function POST(req) {
         try {
           pushChat(room, role, payload?.text);
         } catch (e) {
-          return NextResponse.json({ error: safeErrorCode(e) }, { status: 400 });
+          const info = errorResponseInfo(e);
+          return NextResponse.json({ error: info.code, message: info.message }, { status: info.status });
         }
         await guardedSetRoom(code, room);
         return NextResponse.json({ view: withChat(viewOf(room, role), room, role) });
@@ -96,6 +97,9 @@ export async function POST(req) {
             case 'sp_noble':
               actSpNoble(room, role, payload);
               break;
+            case 'sp_coin':
+              actSpCoin(room, role, payload);
+              break;
             case 'sp_rematch':
               actSpRematch(room, role);
               break;
@@ -103,7 +107,11 @@ export async function POST(req) {
               return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
           }
         } catch (e) {
-          return NextResponse.json({ error: safeErrorCode(e), view: withChat(splendorViewFor(room, role), room, role) }, { status: 409 });
+          const info = errorResponseInfo(e);
+          return NextResponse.json(
+            { error: info.code, message: info.message, view: withChat(splendorViewFor(room, role), room, role) },
+            { status: info.status }
+          );
         }
         await guardedSetRoom(code, room);
         return NextResponse.json({ view: withChat(splendorViewFor(room, role), room, role) });

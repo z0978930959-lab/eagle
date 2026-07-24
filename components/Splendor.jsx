@@ -155,10 +155,15 @@ function FlightLayer({ flights }) {
 
 /* 貴族登場：全畫面的登場演出，結束後才把貴族送進玩家區域 */
 function NobleEntrance({ fx, onDone }) {
+  // onDone 是父層的行內函式，每次輪詢重新渲染都會換一個新的。
+  // 若把它放進依賴陣列，計時器會被反覆重設而永遠不會觸發，
+  // 所以改用 ref 保存，效果只依 fx.id 起算一次。
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
   useEffect(() => {
-    const t = setTimeout(onDone, 3000);
+    const t = setTimeout(() => doneRef.current(), 3000);
     return () => clearTimeout(t);
-  }, [fx.id, onDone]);
+  }, [fx.id]);
 
   const sparks = Array.from({ length: 14 }, (_, i) => {
     const ang = (i / 14) * Math.PI * 2;
@@ -219,7 +224,7 @@ function NobleEntrance({ fx, onDone }) {
           </div>
           <div className="font-display font-black text-4xl mt-1" style={{ color: '#f5cf6a', textShadow: '0 0 22px rgba(245,207,106,.55)' }}>
             +3
-            <span className="text-sm font-mono-tc ml-1" style={{ color: '#f5cf6aaa' }}>
+            <span className="text-sm font-mono ml-1" style={{ color: '#f5cf6aaa' }}>
               pts
             </span>
           </div>
@@ -256,7 +261,7 @@ function Gem({ idx, size = 26, count, dim, className = '' }) {
       <img src={gemSrc(k)} alt="" draggable={false} className="relative w-[82%] h-[82%] object-contain drop-shadow" />
       {count !== undefined && (
         <span
-          className="absolute -bottom-1 -right-1 min-w-[15px] h-[15px] px-[3px] rounded-full bg-black/85 border border-field-chalk/25 text-[10px] font-mono-tc text-field-chalk flex items-center justify-center"
+          className="absolute -bottom-1 -right-1 min-w-[15px] h-[15px] px-[3px] rounded-full bg-black/85 border border-field-chalk/25 text-[10px] font-mono text-field-chalk flex items-center justify-center"
           style={{ fontSize: 10 }}
         >
           {count}
@@ -286,7 +291,7 @@ function Pts({ n, big }) {
       >
         {n}
       </span>
-      <span className="text-[9px] font-mono-tc" style={{ color: '#f5cf6a99' }}>
+      <span className="text-[9px] font-mono" style={{ color: '#f5cf6a99' }}>
         pts
       </span>
     </span>
@@ -343,7 +348,7 @@ function DevCard({ card, affordable, oppAfford, onClick, disabled, compact, flyI
           {costs.map(({ i, n }) => (
             <span key={i} className="flex items-center gap-1">
               <Gem idx={i} size={compact ? 14 : 17} />
-              <span className="font-mono-tc text-[11px] text-field-chalk/90 leading-none drop-shadow">{n}</span>
+              <span className="font-mono text-[11px] text-field-chalk/90 leading-none drop-shadow">{n}</span>
             </span>
           ))}
         </span>
@@ -386,7 +391,7 @@ function PaymentPreview({ me, card }) {
         {rows.map(({ i, own, spend, bonus }) => (
           <div key={i} className="flex items-center gap-1.5">
             <Gem idx={i} size={17} />
-            {bonus > 0 && <span className="font-mono-tc text-[9px] text-[#f5cf6a99] w-7">折{bonus}</span>}
+            {bonus > 0 && <span className="font-mono text-[9px] text-[#f5cf6a99] w-7">折{bonus}</span>}
             {bonus === 0 && <span className="w-7" />}
             <div className="flex gap-[3px] flex-wrap flex-1">
               {Array.from({ length: own }).map((_, k) => (
@@ -395,7 +400,7 @@ function PaymentPreview({ me, card }) {
                 </span>
               ))}
             </div>
-            <span className={`font-mono-tc text-[11px] ${spend > 0 ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
+            <span className={`font-mono text-[11px] ${spend > 0 ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
               {own - spend}
             </span>
           </div>
@@ -412,7 +417,7 @@ function PaymentPreview({ me, card }) {
                 </span>
               ))}
             </div>
-            <span className={`font-mono-tc text-[11px] ${goldRow.spend > 0 ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
+            <span className={`font-mono text-[11px] ${goldRow.spend > 0 ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
               {goldRow.own - goldRow.spend}
             </span>
           </div>
@@ -442,7 +447,7 @@ function MiniNoble({ noble, myBonus }) {
           return (
             <span key={i} className="flex items-center gap-[2px]">
               <Gem idx={i} size={11} />
-              <span className={`font-mono-tc text-[9px] leading-none ${have >= v ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
+              <span className={`font-mono text-[9px] leading-none ${have >= v ? 'text-[#f5cf6a]' : 'text-field-chalk/45'}`}>
                 {Math.min(have, v)}/{v}
               </span>
             </span>
@@ -482,9 +487,9 @@ function NobleCard({ noble, myBonus, oppBonus, onClick, selectable, flyId }) {
             return (
               <div key={i} className="flex items-center gap-1.5">
                 <Gem idx={i} size={15} />
-                <span className="font-mono-tc text-[11px] text-field-chalk/80 w-4">{v}</span>
-                <span className={`font-mono-tc text-[10px] ${mine >= v ? 'text-[#f5cf6a]' : 'text-field-chalk/40'}`}>你 {mine}</span>
-                <span className={`font-mono-tc text-[10px] ${opp >= v ? 'text-[#ff7a7a]' : 'text-field-chalk/30'}`}>敵 {opp}</span>
+                <span className="font-mono text-[11px] text-field-chalk/80 w-4">{v}</span>
+                <span className={`font-mono text-[10px] ${mine >= v ? 'text-[#f5cf6a]' : 'text-field-chalk/40'}`}>你 {mine}</span>
+                <span className={`font-mono text-[10px] ${opp >= v ? 'text-[#ff7a7a]' : 'text-field-chalk/30'}`}>敵 {opp}</span>
               </div>
             );
           })}
@@ -515,7 +520,7 @@ function NobleTile({ noble, onClick, selectable, flyId }) {
             v ? (
               <span key={i} className="flex items-center gap-[2px]">
                 <Gem idx={i} size={13} />
-                <span className="font-mono-tc text-[10px] text-field-chalk/90 leading-none">{v}</span>
+                <span className="font-mono text-[10px] text-field-chalk/90 leading-none">{v}</span>
               </span>
             ) : null
           )}
@@ -557,14 +562,14 @@ function Seat({ p, name, active, isMe, res, onBuyRes, discardMode, onDiscard, wi
           {isMe && <span className="text-[10px] text-field-chalk/40 ml-1">（你）</span>}
         </span>
         <span className="flex items-baseline gap-2">
-          <span className="text-[10px] text-field-chalk/35 font-mono-tc">{p.cards} 卡</span>
+          <span className="text-[10px] text-field-chalk/35 font-mono">{p.cards} 卡</span>
           <span
             className="font-display font-black text-2xl"
             style={{ color: '#f5cf6a', textShadow: '0 1px 3px rgba(0,0,0,.85)' }}
           >
             {p.pts}
           </span>
-          <span className="text-[10px] font-mono-tc" style={{ color: '#f5cf6a80' }}>
+          <span className="text-[10px] font-mono" style={{ color: '#f5cf6a80' }}>
             / {winPoints}
           </span>
         </span>
@@ -575,7 +580,7 @@ function Seat({ p, name, active, isMe, res, onBuyRes, discardMode, onDiscard, wi
         {p.bonus.map((b, i) => (
           <div key={i} className="flex flex-col items-center gap-1">
             <Gem idx={i} size={22} dim={!b} />
-            <span className={`font-mono-tc text-[11px] ${b ? 'text-field-chalk/85' : 'text-field-chalk/25'}`}>{b}</span>
+            <span className={`font-mono text-[11px] ${b ? 'text-field-chalk/85' : 'text-field-chalk/25'}`}>{b}</span>
           </div>
         ))}
       </div>
@@ -747,7 +752,7 @@ function Lobby({ onEnter, initialError }) {
               onKeyDown={(e) => e.key === 'Enter' && join()}
               placeholder="4 位數房號"
               inputMode="numeric"
-              className="w-full text-center font-mono-tc text-2xl tracking-[0.5em] bg-black/40 border border-field-chalk/25 rounded-xl py-3 mb-4 text-field-chalk focus:outline-none focus:border-field-floodlight/70"
+              className="w-full text-center font-mono text-2xl tracking-[0.5em] bg-black/40 border border-field-chalk/25 rounded-xl py-3 mb-4 text-field-chalk focus:outline-none focus:border-field-floodlight/70"
             />
             <button
               onClick={join}
@@ -761,6 +766,72 @@ function Lobby({ onEnter, initialError }) {
 
         {err && <div className="mt-4 text-sm text-red-300/85">{err}</div>}
       </div>
+    </div>
+  );
+}
+
+/* ---------------- 猜金幣 ---------------- */
+
+const SIDE_LABEL = { H: '正面', T: '反面' };
+
+function CoinToss({ v, onPick, busy }) {
+  const c = v.coin || {};
+  const decided = !!c.first;
+  const iWon = c.first === v.role;
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-gradient-to-b from-[#1a1430] to-[#0b0912]">
+      <div className="text-[11px] tracking-[0.4em] text-field-chalk/40 mb-8 pl-[0.4em]">猜金幣決定先後手</div>
+
+      <div
+        className="w-28 h-28 mb-8"
+        style={{ animation: decided ? 'spCoinSpin 1.1s cubic-bezier(.3,.7,.3,1) both' : 'spCoinIdle 2.4s ease-in-out infinite' }}
+      >
+        <img src="/splendor/gems/gold.png" alt="" className="w-full h-full object-contain drop-shadow-2xl" />
+      </div>
+
+      {!decided ? (
+        <>
+          {!c.myPick ? (
+            <>
+              <div className="text-sm text-field-chalk/70 mb-5">選一面</div>
+              <div className="flex gap-3">
+                {['H', 'T'].map((side) => (
+                  <button
+                    key={side}
+                    onClick={() => onPick(side)}
+                    disabled={busy}
+                    className="px-9 py-3 rounded-xl border-2 border-field-floodlight/50 text-field-floodlight tracking-widest disabled:opacity-40 hover:bg-field-floodlight/15 transition-colors"
+                  >
+                    {SIDE_LABEL[side]}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="text-center">
+              <div className="text-sm text-field-chalk/70">
+                你押了 <span style={{ color: '#f5cf6a' }}>{SIDE_LABEL[c.myPick]}</span>
+              </div>
+              <div className="text-xs text-field-chalk/40 mt-3">
+                {c.oppPicked ? '雙方都選好了，正在開盅…' : '等待對手選擇…'}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-center" style={{ animation: 'spRise 400ms ease-out 900ms both' }}>
+          <div className="text-xs text-field-chalk/45 mb-2">
+            你押 {SIDE_LABEL[c.myPick]}　·　對手押 {SIDE_LABEL[c.oppPick]}
+          </div>
+          <div className="font-display text-2xl font-black mb-1" style={{ color: '#f5cf6a' }}>
+            金幣是{SIDE_LABEL[c.toss]}
+          </div>
+          {c.tiebreak && <div className="text-[11px] text-field-chalk/40 mb-2">雙方同押，加擲一次裁決</div>}
+          <div className="text-lg text-field-chalk/85 mt-3">{iWon ? '你先手' : '對手先手'}</div>
+          <div className="text-[11px] text-field-chalk/35 mt-4">即將開始…</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -779,6 +850,7 @@ export default function Splendor() {
   const [flights, launch] = useFlights();
   const playedRef = useRef(null); // null = 尚未初始化；Set = 已播過的動作序號
   const [nobleFx, setNobleFx] = useState(null); // 貴族登場演出
+  const [coinDone, setCoinDone] = useState(false); // 猜金幣結果是否已看完
 
   // 還原上次的對局
   useEffect(() => {
@@ -884,6 +956,18 @@ export default function Splendor() {
     if (items.length) launch(items);
   }, [view, launch]);
 
+  // 進入新的猜金幣階段就重置
+  useEffect(() => {
+    if (view?.phase === 'coin') setCoinDone(false);
+  }, [view?.phase]);
+
+  // 開盅後停留一下讓雙方看清楚，再進入棋盤
+  useEffect(() => {
+    if (!view?.coin?.first || coinDone) return;
+    const t = setTimeout(() => setCoinDone(true), 2800);
+    return () => clearTimeout(t);
+  }, [view?.coin?.first, coinDone]);
+
   function enter(code, token, v) {
     saveSession(code, token);
     setSession({ code, token });
@@ -893,6 +977,7 @@ export default function Splendor() {
 
   function leave() {
     playedRef.current = null;
+    setCoinDone(false);
     clearSession();
     setSession(null);
     setView(null);
@@ -928,7 +1013,7 @@ export default function Splendor() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-gradient-to-b from-[#1a1430] to-[#0b0912] px-6 text-center">
         <div className="text-field-chalk/50 text-sm tracking-widest">把房號給對手</div>
-        <div className="font-mono-tc text-6xl tracking-[0.3em] pl-[0.3em]" style={{ color: '#f5cf6a' }}>
+        <div className="font-mono text-6xl tracking-[0.3em] pl-[0.3em]" style={{ color: '#f5cf6a' }}>
           {v.code}
         </div>
         <div className="text-field-chalk/35 text-xs">等待對手加入…</div>
@@ -937,6 +1022,16 @@ export default function Splendor() {
         </button>
         <Chat code={session.code} token={session.token} chat={v.chat} role={v.chatRole} labels={labels} onView={setView} />
       </div>
+    );
+  }
+
+  /* 猜金幣：雙方選面 → 開盅 → 停留 2.8 秒後進棋盤 */
+  if (v.phase === 'coin' || (v.coin?.first && !coinDone)) {
+    return (
+      <>
+        <CoinToss v={v} busy={busy} onPick={(side) => act('sp_coin', { side })} />
+        <Chat code={session.code} token={session.token} chat={v.chat} role={v.chatRole} labels={labels} onView={setView} />
+      </>
     );
   }
 
@@ -983,7 +1078,7 @@ export default function Splendor() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#171226] via-[#120f1e] to-[#0a0810] pb-24">
       {/* 左側常駐面板：捲動時也看得到貴族進度與自己的寶石 */}
-      <aside className="hidden xl:flex fixed left-3 top-16 z-40 w-[176px] flex-col gap-3">
+      <aside className="hidden lg:flex fixed left-2 top-14 z-40 w-[168px] flex-col gap-2.5">
         <div className="rounded-xl border border-[#d6b153]/35 bg-[#0d0a18]/92 backdrop-blur p-2.5">
           <div className="text-[9px] tracking-[0.25em] text-field-chalk/35 mb-2">貴族進度</div>
           <div className="space-y-2">
@@ -999,19 +1094,19 @@ export default function Splendor() {
             {v.me.tok.map((n, i) => (
               <div key={i} className={`flex items-center gap-2 ${n ? '' : 'opacity-30'}`}>
                 <Gem idx={i} size={20} />
-                <span className="font-mono-tc text-[11px] text-field-chalk/80 w-4">{n}</span>
-                <span className="font-mono-tc text-[9px] text-[#f5cf6a99]">折{v.me.bonus[i]}</span>
+                <span className="font-mono text-[11px] text-field-chalk/80 w-4">{n}</span>
+                <span className="font-mono text-[9px] text-[#f5cf6a99]">折{v.me.bonus[i]}</span>
               </div>
             ))}
             <div className={`flex items-center gap-2 pt-1.5 border-t border-field-chalk/10 ${v.me.gold ? '' : 'opacity-30'}`}>
               <Gem idx="gold" size={20} />
-              <span className="font-mono-tc text-[11px] text-field-chalk/80 w-4">{v.me.gold}</span>
+              <span className="font-mono text-[11px] text-field-chalk/80 w-4">{v.me.gold}</span>
             </div>
           </div>
           <div className="mt-2 pt-2 border-t border-field-chalk/10 flex items-baseline justify-between">
             <span className="text-[9px] text-field-chalk/35">持有</span>
             <span
-              className={`font-mono-tc text-[11px] ${
+              className={`font-mono text-[11px] ${
                 v.me.tok.reduce((a, b) => a + b, 0) + v.me.gold >= 10 ? 'text-[#ff7a7a]' : 'text-field-chalk/60'
               }`}
             >
@@ -1021,14 +1116,14 @@ export default function Splendor() {
         </div>
       </aside>
 
-      <div className="max-w-5xl mx-auto px-3 sm:px-5 pt-4 xl:pl-[196px]">
+      <div className="max-w-5xl mx-auto px-3 sm:px-5 pt-4 lg:pl-[184px]">
         {/* 頂列 */}
         <div className="flex items-center justify-between gap-3 pb-3 mb-4 border-b border-field-chalk/12">
           <div className="flex items-baseline gap-3">
             <span className="font-display text-lg font-bold" style={{ color: '#f5cf6a' }}>
               璀璨寶石
             </span>
-            <span className="font-mono-tc text-xs text-field-chalk/35">房號 {v.code}</span>
+            <span className="font-mono text-xs text-field-chalk/35">房號 {v.code}</span>
           </div>
           <div className={`text-xs tracking-wider ${myTurn || discardMode || nobleMode ? 'text-field-floodlight' : 'text-field-chalk/45'}`}>
             {statusLine}
@@ -1073,7 +1168,7 @@ export default function Splendor() {
                         {lv === 1 ? '基礎礦脈' : lv === 2 ? '運輸車隊' : '大師工坊'}
                       </span>
                     </div>
-                    <span className="font-mono-tc text-[10px] text-field-chalk/35">牌堆剩 {v.deckCounts[lv - 1]}</span>
+                    <span className="font-mono text-[10px] text-field-chalk/35">牌堆剩 {v.deckCounts[lv - 1]}</span>
                   </div>
 
                   <div className="flex gap-2">
@@ -1124,7 +1219,7 @@ export default function Splendor() {
                   >
                     <Gem idx={i} size={26} />
                     <span className="text-[11px] text-field-chalk/55 flex-1 text-left">{GEM_NAME[i]}</span>
-                    <span className="font-mono-tc text-sm text-field-chalk/85">{n}</span>
+                    <span className="font-mono text-sm text-field-chalk/85">{n}</span>
                     {picked > 0 && <span className="text-[10px] text-field-floodlight">＋{picked}</span>}
                   </button>
                 );
@@ -1132,7 +1227,7 @@ export default function Splendor() {
               <div data-fly="bank-gold" className="flex items-center gap-2.5 px-2 py-1.5 opacity-70">
                 <Gem idx="gold" size={26} />
                 <span className="text-[11px] text-field-chalk/45 flex-1 text-left">黃金（保留時取得）</span>
-                <span className="font-mono-tc text-sm text-field-chalk/70">{v.gold}</span>
+                <span className="font-mono text-sm text-field-chalk/70">{v.gold}</span>
               </div>
             </div>
 
