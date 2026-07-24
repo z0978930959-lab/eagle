@@ -459,7 +459,7 @@ function MiniNoble({ noble, myBonus }) {
 }
 
 // 上方主要的貴族卡：放大，並列出雙方各色現有數
-function NobleCard({ noble, myBonus, oppBonus, onClick, selectable, flyId }) {
+function NobleCard({ noble, myBonus, others = [], onClick, selectable, flyId }) {
   const reqs = noble.req.map((v, i) => (v ? { i, v } : null)).filter(Boolean);
   return (
     <button
@@ -483,13 +483,19 @@ function NobleCard({ noble, myBonus, oppBonus, onClick, selectable, flyId }) {
         <div className="space-y-[3px]">
           {reqs.map(({ i, v }) => {
             const mine = myBonus?.[i] || 0;
-            const opp = oppBonus?.[i] || 0;
             return (
-              <div key={i} className="flex items-center gap-1.5">
+              <div key={i} className="flex items-center gap-1.5 flex-wrap">
                 <Gem idx={i} size={15} />
                 <span className="font-mono text-[11px] text-field-chalk/80 w-4">{v}</span>
                 <span className={`font-mono text-[10px] ${mine >= v ? 'text-[#f5cf6a]' : 'text-field-chalk/40'}`}>你 {mine}</span>
-                <span className={`font-mono text-[10px] ${opp >= v ? 'text-[#ff7a7a]' : 'text-field-chalk/30'}`}>敵 {opp}</span>
+                {others.map((o) => {
+                  const n = o.bonus?.[i] || 0;
+                  return (
+                    <span key={o.seat} className={`font-mono text-[10px] ${n >= v ? 'text-[#ff7a7a]' : 'text-field-chalk/30'}`}>
+                      {o.name.replace('玩家', '')} {n}
+                    </span>
+                  );
+                })}
               </div>
             );
           })}
@@ -556,6 +562,11 @@ function Seat({ p, name, active, isMe, res, onBuyRes, discardMode, onDiscard, wi
               style={{ color: '#f5cf6a', fontSize: 15, textShadow: '0 0 10px rgba(245,207,106,.6)', animation: 'spBob 1.1s ease-in-out infinite' }}
             >
               ▼
+            </span>
+          )}
+          {p.order !== null && p.order !== undefined && (
+            <span className="text-[10px] font-mono mr-1" style={{ color: '#f5cf6a99' }}>
+              {p.order + 1}．
             </span>
           )}
           {name}
@@ -661,6 +672,7 @@ function Seat({ p, name, active, isMe, res, onBuyRes, discardMode, onDiscard, wi
 
 function Lobby({ onEnter, initialError }) {
   const [tab, setTab] = useState('create');
+  const [players, setPlayers] = useState(2);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(initialError || '');
@@ -669,7 +681,7 @@ function Lobby({ onEnter, initialError }) {
     setBusy(true);
     setErr('');
     try {
-      const d = await api('/api/room/create', { mode: 'splendor' });
+      const d = await api('/api/room/create', { mode: 'splendor', players });
       onEnter(d.code, d.token, d.view);
     } catch (e) {
       setErr(e.message);
@@ -731,10 +743,31 @@ function Lobby({ onEnter, initialError }) {
 
         {tab === 'create' ? (
           <>
+            <div className="mb-5">
+              <div className="text-[10px] tracking-[0.25em] text-field-chalk/35 mb-2">遊戲人數</div>
+              <div className="flex gap-2">
+                {[2, 3].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setPlayers(n)}
+                    className={`flex-1 py-3 rounded-xl border-2 transition-colors ${
+                      players === n
+                        ? 'border-field-floodlight text-field-floodlight bg-field-floodlight/10'
+                        : 'border-field-chalk/20 text-field-chalk/50 hover:border-field-chalk/40'
+                    }`}
+                  >
+                    <div className="text-lg font-bold">{n} 人</div>
+                    <div className="text-[10px] mt-0.5 opacity-70">
+                      {n === 2 ? '寶石各 4／貴族 3' : '寶石各 5／貴族 4'}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
             <p className="text-xs text-field-chalk/45 leading-relaxed mb-5">
-              建立後會拿到 4 位數房號，把號碼給對手就能開打。
+              建立後會拿到 4 位數房號，人到齊就自動開始。
               <br />
-              建房方為先手。
+              {players === 2 ? '以猜金幣決定先後手。' : '以抽籤決定 1／2／3 順位。'}
             </p>
             <button
               onClick={create}
@@ -794,18 +827,29 @@ function CoinToss({ v, onPick, busy }) {
         <>
           {!c.myPick ? (
             <>
-              <div className="text-sm text-field-chalk/70 mb-5">選一面</div>
+              <div className="text-sm text-field-chalk/70 mb-1">選一面</div>
+              <div className="text-[11px] text-field-chalk/35 mb-5">
+                {c.oppPick ? '對手已押走一面，你只能選剩下那面' : '雙方不能押同一面，先選先贏'}
+              </div>
               <div className="flex gap-3">
-                {['H', 'T'].map((side) => (
-                  <button
-                    key={side}
-                    onClick={() => onPick(side)}
-                    disabled={busy}
-                    className="px-9 py-3 rounded-xl border-2 border-field-floodlight/50 text-field-floodlight tracking-widest disabled:opacity-40 hover:bg-field-floodlight/15 transition-colors"
-                  >
-                    {SIDE_LABEL[side]}
-                  </button>
-                ))}
+                {['H', 'T'].map((side) => {
+                  const taken = c.oppPick === side;
+                  return (
+                    <button
+                      key={side}
+                      onClick={() => !taken && onPick(side)}
+                      disabled={busy || taken}
+                      className={`relative px-9 py-3 rounded-xl border-2 tracking-widest transition-colors ${
+                        taken
+                          ? 'border-field-chalk/15 text-field-chalk/25 cursor-not-allowed bg-black/30'
+                          : 'border-field-floodlight/50 text-field-floodlight hover:bg-field-floodlight/15'
+                      } disabled:opacity-60`}
+                    >
+                      {SIDE_LABEL[side]}
+                      {taken && <span className="block text-[9px] mt-0.5 opacity-70">對手已選</span>}
+                    </button>
+                  );
+                })}
               </div>
             </>
           ) : (
@@ -827,11 +871,40 @@ function CoinToss({ v, onPick, busy }) {
           <div className="font-display text-2xl font-black mb-1" style={{ color: '#f5cf6a' }}>
             金幣是{SIDE_LABEL[c.toss]}
           </div>
-          {c.tiebreak && <div className="text-[11px] text-field-chalk/40 mb-2">雙方同押，加擲一次裁決</div>}
-          <div className="text-lg text-field-chalk/85 mt-3">{iWon ? '你先手' : '對手先手'}</div>
+          <div className="text-lg text-field-chalk/85 mt-3">{iWon ? '你先手' : `${c.firstName} 先手`}</div>
           <div className="text-[11px] text-field-chalk/35 mt-4">即將開始…</div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* 三人局：入座後自動抽籤，揭曉 1／2／3 順位 */
+function Lottery({ v }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 bg-gradient-to-b from-[#1a1430] to-[#0b0912]">
+      <div className="text-[11px] tracking-[0.4em] text-field-chalk/40 mb-8 pl-[0.4em]">抽籤決定順位</div>
+      <div className="w-full max-w-xs space-y-2.5">
+        {(v.draw?.order || []).map((o, i) => (
+          <div
+            key={o.seat}
+            className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
+              o.isMe ? 'border-[#f5cf6a]/70 bg-[#f5cf6a]/[0.08]' : 'border-field-chalk/15 bg-black/30'
+            }`}
+            style={{ animation: `spRise 480ms ease-out ${i * 420}ms both` }}
+          >
+            <span className="font-display font-black text-2xl w-7" style={{ color: o.isMe ? '#f5cf6a' : '#e9e6df66' }}>
+              {i + 1}
+            </span>
+            <span className="flex-1 text-left text-sm text-field-chalk/85">
+              {o.name}
+              {o.isMe && <span className="text-[10px] text-field-chalk/45 ml-1">（你）</span>}
+            </span>
+            {i === 0 && <span className="text-[10px]" style={{ color: '#f5cf6a' }}>先手</span>}
+          </div>
+        ))}
+      </div>
+      <div className="text-[11px] text-field-chalk/30 mt-8">即將開始…</div>
     </div>
   );
 }
@@ -957,17 +1030,18 @@ export default function Splendor() {
     if (items.length) launch(items);
   }, [view, launch]);
 
-  // 進入新的猜金幣階段就重置
+  // 進入新的決定順位階段就重置
   useEffect(() => {
     if (view?.phase === 'coin') setCoinDone(false);
   }, [view?.phase]);
 
-  // 開盅後停留一下讓雙方看清楚，再進入棋盤
+  // 揭曉後停留一下讓所有人看清楚，再進入棋盤
+  const revealKey = view?.coin?.first || (view?.draw ? view.draw.order.map((o) => o.seat).join() : null);
   useEffect(() => {
-    if (!view?.coin?.first || coinDone) return;
-    const t = setTimeout(() => setCoinDone(true), 2800);
+    if (!revealKey || coinDone) return;
+    const t = setTimeout(() => setCoinDone(true), view?.playerCount === 3 ? 3200 : 2800);
     return () => clearTimeout(t);
-  }, [view?.coin?.first, coinDone]);
+  }, [revealKey, coinDone, view?.playerCount]);
 
   function enter(code, token, v) {
     saveSession(code, token);
@@ -1005,19 +1079,22 @@ export default function Splendor() {
   if (!session || !view) return <Lobby onEnter={enter} initialError={lobbyErr} />;
 
   const v = view;
-  const meName = v.role === 'away' ? '建房方' : '加入方';
-  const oppName = v.role === 'away' ? '加入方' : '建房方';
-  const labels = { away: '建房方', home: '加入方' };
+  const meName = v.myName;
+  const labels = Object.fromEntries([[v.role, v.myName], ...v.others.map((o) => [o.seat, o.name])]);
 
   /* 等待對手 */
-  if (!v.oppJoined) {
+  if (!v.allJoined) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-gradient-to-b from-[#1a1430] to-[#0b0912] px-6 text-center">
-        <div className="text-field-chalk/50 text-sm tracking-widest">把房號給對手</div>
+        <div className="text-field-chalk/50 text-sm tracking-widest">
+          {v.playerCount === 3 ? '把房號給另外兩位' : '把房號給對手'}
+        </div>
         <div className="font-mono text-6xl tracking-[0.3em] pl-[0.3em]" style={{ color: '#f5cf6a' }}>
           {v.code}
         </div>
-        <div className="text-field-chalk/35 text-xs">等待對手加入…</div>
+        <div className="text-field-chalk/35 text-xs">
+          已入座 {v.joinedCount}/{v.playerCount}　·　等待其他玩家…
+        </div>
         <button onClick={leave} className="text-field-chalk/40 text-xs underline underline-offset-4 hover:text-field-chalk/70">
           取消並回大廳
         </button>
@@ -1026,11 +1103,19 @@ export default function Splendor() {
     );
   }
 
-  /* 猜金幣：雙方選面 → 開盅 → 停留 2.8 秒後進棋盤 */
+  /* 決定順位：2 人猜金幣、3 人抽籤，揭曉後停留數秒再進棋盤 */
   if (v.phase === 'coin' || (v.coin?.first && !coinDone)) {
     return (
       <>
         <CoinToss v={v} busy={busy} onPick={(side) => act('sp_coin', { side })} />
+        <Chat code={session.code} token={session.token} chat={v.chat} role={v.chatRole} labels={labels} onView={setView} />
+      </>
+    );
+  }
+  if (v.playerCount === 3 && v.draw && !coinDone) {
+    return (
+      <>
+        <Lottery v={v} />
         <Chat code={session.code} token={session.token} chat={v.chat} role={v.chatRole} labels={labels} onView={setView} />
       </>
     );
@@ -1074,7 +1159,7 @@ export default function Splendor() {
         ? '有多位貴族願意造訪，選一位'
         : myTurn
           ? '輪到你行動'
-          : '等待對手行動…';
+          : `等待 ${v.turnName} 行動…`;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#171226] via-[#120f1e] to-[#0a0810] pb-24">
@@ -1124,7 +1209,9 @@ export default function Splendor() {
             <span className="font-display text-lg font-bold" style={{ color: '#f5cf6a' }}>
               璀璨寶石
             </span>
-            <span className="font-mono text-xs text-field-chalk/35">房號 {v.code}</span>
+            <span className="font-mono text-xs text-field-chalk/35">
+              房號 {v.code}　·　{v.playerCount} 人局
+            </span>
           </div>
           <div className={`text-xs tracking-wider ${myTurn || discardMode || nobleMode ? 'text-field-floodlight' : 'text-field-chalk/45'}`}>
             {statusLine}
@@ -1141,7 +1228,7 @@ export default function Splendor() {
                 noble={n}
                 flyId={`noble-${i}`}
                 myBonus={v.me?.bonus}
-                oppBonus={v.opp?.bonus}
+                others={v.others}
                 selectable={nobleMode && v.nobleChoices.includes(i)}
                 onClick={() => act('sp_noble', { idx: i })}
               />
@@ -1252,7 +1339,7 @@ export default function Splendor() {
         </div>
 
         {/* 雙方 */}
-        <div className="grid sm:grid-cols-2 gap-3 mt-5">
+        <div className={`grid gap-3 mt-5 ${v.playerCount === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
           <Seat
             p={v.me}
             res={v.me.res}
@@ -1269,13 +1356,16 @@ export default function Splendor() {
                 : null
             }
           />
-          <Seat
-            p={v.opp}
-            name={oppName}
-            role={v.role === 'away' ? 'home' : 'away'}
-            active={!myTurn && v.phase !== 'over'}
-            winPoints={v.winPoints}
-          />
+          {v.others.map((o) => (
+            <Seat
+              key={o.seat}
+              p={o}
+              name={o.name}
+              role={o.seat}
+              active={v.turn === o.seat && v.phase !== 'over'}
+              winPoints={v.winPoints}
+            />
+          ))}
         </div>
 
         {/* 戰報 */}
@@ -1390,16 +1480,16 @@ export default function Splendor() {
               const title = surrendered
                 ? v.iSurrendered
                   ? '你投降了'
-                  : '對手投降了'
+                  : `${v.winnerName || ''} 獲勝`
                 : v.winner === 'draw'
                   ? '平手'
                   : v.winner === v.role
                     ? '你獲勝了'
-                    : '對手獲勝';
+                    : `${v.winnerName} 獲勝`;
               const sub = surrendered
                 ? v.iSurrendered
                   ? '棄子認輸，下一局再算帳'
-                  : '對手舉了白旗，這局歸你'
+                  : '有人舉了白旗'
                 : v.winner === 'draw'
                   ? '分數與卡數完全相同'
                   : '十五分達成';
@@ -1421,27 +1511,32 @@ export default function Splendor() {
               );
             })()}
 
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {[
-                { label: '你', p: v.me, win: v.winner === v.role },
-                { label: '對手', p: v.opp, win: v.winner && v.winner !== 'draw' && v.winner !== v.role },
-              ].map(({ label, p, win }) => (
-                <div
-                  key={label}
-                  className={`rounded-xl border p-2.5 ${win ? 'border-[#f5cf6a]/60 bg-[#f5cf6a]/[0.07]' : 'border-field-chalk/12 bg-black/25'}`}
-                >
-                  <div className="text-[10px] text-field-chalk/40 mb-1">{label}</div>
-                  <div className="font-display font-black text-2xl" style={{ color: win ? '#f5cf6a' : '#e9e6df99' }}>
-                    {p.pts}
-                    <span className="text-[10px] font-mono ml-0.5" style={{ color: '#f5cf6a80' }}>
-                      pts
+            <div className="space-y-1.5 mb-4">
+              {(v.standings || []).map((r, i) => {
+                const win = v.winner !== 'draw' && r.seat === v.winner;
+                const isMe = r.seat === v.role;
+                return (
+                  <div
+                    key={r.seat}
+                    className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 ${
+                      win ? 'border-[#f5cf6a]/60 bg-[#f5cf6a]/[0.08]' : 'border-field-chalk/12 bg-black/25'
+                    }`}
+                  >
+                    <span className="font-display font-black text-lg w-5 text-left" style={{ color: win ? '#f5cf6a' : '#e9e6df55' }}>
+                      {r.surrendered ? '—' : i + 1}
+                    </span>
+                    <span className="flex-1 text-left text-xs text-field-chalk/80">
+                      {r.name}
+                      {isMe && <span className="text-field-chalk/35 ml-1">（你）</span>}
+                      {r.surrendered && <span className="text-red-300/70 ml-1">投降</span>}
+                    </span>
+                    <span className="text-[10px] text-field-chalk/35">{r.cards} 卡</span>
+                    <span className="font-display font-black text-xl" style={{ color: win ? '#f5cf6a' : '#e9e6df99' }}>
+                      {r.pts}
                     </span>
                   </div>
-                  <div className="text-[10px] text-field-chalk/35 mt-0.5">
-                    {p.cards} 張卡　·　{p.nobles} 貴族
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {v.endReason !== 'surrender' && (

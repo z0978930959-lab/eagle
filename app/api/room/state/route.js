@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { viewFor, roleOf, enforceTimeouts } from '../../../../lib/gameLogic';
 import { bingoViewFor } from '../../../../lib/bingoLogic';
-import { splendorViewFor } from '../../../../lib/splendorLogic';
+import { splendorViewFor, splendorRoleOf } from '../../../../lib/splendorLogic';
 import { chatOf } from '../../../../lib/chat';
 import { getRoom, storeReady, withRoomLock, assertCode } from '../../../../lib/store';
 import { errorResponseInfo } from '../../../../lib/apiError';
@@ -39,7 +39,7 @@ export async function POST(req) {
     return await withRoomLock(code, async ({ guardedSetRoom }) => {
       const room = await getRoom(code);
       if (!room) return NextResponse.json({ error: 'NOT_FOUND', message: '房間不存在或已過期' }, { status: 404 });
-      const role = roleOf(room, token);
+      const role = room.type === 'splendor' ? splendorRoleOf(room, token) : roleOf(room, token);
       if (!role) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 });
       if (room.type === 'splendor') {
         return NextResponse.json({ view: withChat(splendorViewFor(room, role), room, role) });

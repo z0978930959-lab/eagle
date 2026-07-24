@@ -1,4 +1,4 @@
-import { actSpTake, actSpBuy, actSpReserve, actSpDiscard, actSpNoble, actSpRematch, actSpCoin, actSpSurrender, splendorViewFor } from '../../../../lib/splendorLogic';
+import { splendorRoleOf, actSpTake, actSpBuy, actSpReserve, actSpDiscard, actSpNoble, actSpRematch, actSpCoin, actSpSurrender, splendorViewFor } from '../../../../lib/splendorLogic';
 import { pushChat, chatOf } from '../../../../lib/chat';
 import { actBingoChoose, actBingoRps, actBingoMark, actBingoAnnounce, actBingoDrawOffer, actBingoDrawRespond, bingoViewFor } from '../../../../lib/bingoLogic';
 import { NextResponse } from 'next/server';
@@ -62,7 +62,7 @@ export async function POST(req) {
     return await withRoomLock(code, async ({ guardedSetRoom }) => {
       const room = await getRoom(code);
       if (!room) return NextResponse.json({ error: 'NOT_FOUND', message: '房間不存在或已過期' }, { status: 404 });
-      const role = roleOf(room, token);
+      const role = room.type === 'splendor' ? splendorRoleOf(room, token) : roleOf(room, token);
       if (!role) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 });
 
       // 聊天：三種房型共用，任何階段都能發言（含終局後）
@@ -79,7 +79,8 @@ export async function POST(req) {
 
       // 璀璨寶石房：伺服器端全權判定，前端只送意圖
       if (room.type === 'splendor') {
-        if (!room.sp.players.home) return NextResponse.json({ error: 'NOT_STARTED', message: '對手尚未加入' }, { status: 409 });
+        if (!room.sp.seats.every((st) => room.tokens[st]))
+          return NextResponse.json({ error: 'NOT_STARTED', message: '還在等其他玩家加入' }, { status: 409 });
         try {
           switch (action) {
             case 'sp_take':

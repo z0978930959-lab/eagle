@@ -31,7 +31,8 @@ export default function Chat({ code, token, chat = [], role, labels, onView }) {
   const [seen, setSeen] = useState(0);
   const listRef = useRef(null);
 
-  const names = { away: labels?.away || '建房方', home: labels?.home || '加入方' };
+  const names = labels || {};
+  const nameOf = (r) => names[r] || r;
   const unread = Math.max(0, chat.length - seen);
 
   // 開著的時候自動捲到最新、並把未讀歸零
@@ -112,7 +113,7 @@ export default function Chat({ code, token, chat = [], role, labels, onView }) {
               return (
                 <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
                   <div className="text-[10px] text-field-chalk/35 px-1 mb-0.5">
-                    {mine ? '我' : names[m.role]}　{timeOf(m.ts)}
+                    {mine ? '我' : nameOf(m.role)}　{timeOf(m.ts)}
                   </div>
                   <div
                     className={`max-w-[85%] px-2.5 py-1.5 rounded-xl text-[13px] leading-relaxed whitespace-pre-wrap break-words ${

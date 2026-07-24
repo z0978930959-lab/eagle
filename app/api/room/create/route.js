@@ -37,7 +37,7 @@ export async function POST(req) {
   } catch {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
-  const { innings, teamId, extraMode, mode, reveal, cor } = body || {};
+  const { innings, teamId, extraMode, mode, reveal, cor, players } = body || {};
   const isBingo = mode === 'bingo';
   const isSplendor = mode === 'splendor';
   if (!isBingo && !isSplendor && (![1, 3].includes(innings) || typeof teamId !== 'string' || (extraMode && !['cpbl', 'tiebreak'].includes(extraMode)))) {
@@ -49,7 +49,7 @@ export async function POST(req) {
     let room;
     try {
       room = isSplendor
-        ? createSplendorRoom({ code })
+        ? createSplendorRoom({ code, players: players === 3 ? 3 : 2 })
         : isBingo
           ? createBingoRoom({ code, reveal: !!reveal })
           : createRoom({ code, innings, awayTeamId: teamId, extraMode, cor });
@@ -61,9 +61,9 @@ export async function POST(req) {
       if (await createRoomIfAbsent(code, room)) {
         return NextResponse.json({
           code,
-          token: room.tokens.away,
+          token: isSplendor ? room.tokens.s0 : room.tokens.away,
           view: isSplendor
-            ? splendorViewFor(room, 'away')
+            ? splendorViewFor(room, 's0')
             : isBingo
               ? bingoViewFor(room, 'away')
               : viewFor(room, 'away'),

@@ -52,13 +52,15 @@ export async function POST(req) {
         return NextResponse.json({ error: 'WRONG_MODE', message: `這是${label}房，請從${label}模式加入` }, { status: 409 });
       }
       if (isSplendor) {
+        let seat, token;
         try {
-          joinSplendorRoom(room);
+          ({ seat, token } = joinSplendorRoom(room));
         } catch (e) {
-          return NextResponse.json({ error: safeErrorCode(e) }, { status: 409 });
+          const info = errorResponseInfo(e);
+          return NextResponse.json({ error: info.code, message: info.message }, { status: info.status });
         }
         await guardedSetRoom(code, room);
-        return NextResponse.json({ code, token: room.tokens.home, view: splendorViewFor(room, 'home') });
+        return NextResponse.json({ code, token, view: splendorViewFor(room, seat) });
       }
       if (isBingo) {
         try {
