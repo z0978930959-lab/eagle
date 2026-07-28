@@ -1,6 +1,6 @@
-import { splendorRoleOf, actSpTake, actSpBuy, actSpReserve, actSpDiscard, actSpNoble, actSpRematch, actSpCoin, actSpSurrender, splendorViewFor } from '../../../../lib/splendorLogic';
 import { pushChat, chatOf } from '../../../../lib/chat';
 import { actBingoChoose, actBingoRps, actBingoMark, actBingoAnnounce, actBingoDrawOffer, actBingoDrawRespond, bingoViewFor } from '../../../../lib/bingoLogic';
+import { gameByRoom } from '../../../../lib/gameRegistry';
 import { NextResponse } from 'next/server';
 import {
   viewFor,
@@ -30,11 +30,19 @@ function withChat(view, room, role) {
   return { ...view, chat: chatOf(room), chatRole: role };
 }
 
-// 依房型挑對應的 viewFor
+// 依房型挑對應的 viewFor（註冊表遊戲走 registry，其餘走專用）
 function viewOf(room, role) {
-  if (room.type === 'splendor') return splendorViewFor(room, role);
+  const game = gameByRoom(room);
+  if (game) return game.viewFor(room, role);
   if (room.type === 'bingo') return bingoViewFor(room, role);
   return viewFor(room, role);
+}
+
+// 註冊表遊戲：是否全員到齊、可以行動
+function allPlayersReady(room) {
+  if (room.type === 'splendor') return room.sp.seats.every((st) => room.tokens[st]);
+  // mission/poker/ecard：雙人，b 有 token 即到齊
+  return !!room.tokens.b;
 }
 
 export async function POST(req) {
@@ -62,10 +70,12 @@ export async function POST(req) {
     return await withRoomLock(code, async ({ guardedSetRoom }) => {
       const room = await getRoom(code);
       if (!room) return NextResponse.json({ error: 'NOT_FOUND', message: '房間不存在或已過期' }, { status: 404 });
-      const role = room.type === 'splendor' ? splendorRoleOf(room, token) : roleOf(room, token);
+
+      const game = gameByRoom(room);
+      const role = game ? game.roleOf(room, token) : roleOf(room, token);
       if (!role) return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 });
 
-      // 聊天：三種房型共用，任何階段都能發言（含終局後）
+      // 聊天：所有房型共用，任何階段都能發言
       if (action === 'chat_send') {
         try {
           pushChat(room, role, payload?.text);
@@ -77,51 +87,27 @@ export async function POST(req) {
         return NextResponse.json({ view: withChat(viewOf(room, role), room, role) });
       }
 
-      // 璀璨寶石房：伺服器端全權判定，前端只送意圖
-      if (room.type === 'splendor') {
-        if (!room.sp.seats.every((st) => room.tokens[st]))
+      // 註冊表遊戲（璀璨寶石/密語連線/17撲克/E卡）：統一分派
+      if (game) {
+        if (!allPlayersReady(room)) {
           return NextResponse.json({ error: 'NOT_STARTED', message: '還在等其他玩家加入' }, { status: 409 });
+        }
+        const handler = game.actions[action];
+        if (!handler) return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
         try {
-          switch (action) {
-            case 'sp_take':
-              actSpTake(room, role, payload);
-              break;
-            case 'sp_buy':
-              actSpBuy(room, role, payload);
-              break;
-            case 'sp_reserve':
-              actSpReserve(room, role, payload);
-              break;
-            case 'sp_discard':
-              actSpDiscard(room, role, payload);
-              break;
-            case 'sp_noble':
-              actSpNoble(room, role, payload);
-              break;
-            case 'sp_coin':
-              actSpCoin(room, role, payload);
-              break;
-            case 'sp_surrender':
-              actSpSurrender(room, role);
-              break;
-            case 'sp_rematch':
-              actSpRematch(room, role);
-              break;
-            default:
-              return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
-          }
+          handler(room, role, payload);
         } catch (e) {
           const info = errorResponseInfo(e);
           return NextResponse.json(
-            { error: info.code, message: info.message, view: withChat(splendorViewFor(room, role), room, role) },
+            { error: info.code, message: info.message, view: withChat(game.viewFor(room, role), room, role) },
             { status: info.status }
           );
         }
         await guardedSetRoom(code, room);
-        return NextResponse.json({ view: withChat(splendorViewFor(room, role), room, role) });
+        return NextResponse.json({ view: withChat(game.viewFor(room, role), room, role) });
       }
 
-      // 賓果房：獨立的動作分派（無超時機制，輪到誰就等誰）
+      // 賓果房：獨立的動作分派
       if (room.type === 'bingo') {
         if (!room.bingo.players.home) return NextResponse.json({ error: 'NOT_STARTED', message: '對手尚未加入' }, { status: 409 });
         try {
@@ -148,7 +134,6 @@ export async function POST(req) {
               return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
           }
         } catch (e) {
-          // BOARD_CLASH 會重抽選項（房間有變動），錯誤路徑也要先存檔再回應
           await guardedSetRoom(code, room);
           return NextResponse.json({ error: safeErrorCode(e), view: withChat(bingoViewFor(room, role), room, role) }, { status: 409 });
         }
@@ -158,7 +143,6 @@ export async function POST(req) {
 
       if (!room.game) return NextResponse.json({ error: 'NOT_STARTED', message: '對手尚未加入' }, { status: 409 });
 
-      // 先做超時判定：若該階段已超時被自動處理，晚到的操作會落入 WRONG_PHASE 由前端刷新
       const timedOut = enforceTimeouts(room);
 
       try {
@@ -209,7 +193,7 @@ export async function POST(req) {
             return NextResponse.json({ error: 'BAD_ACTION' }, { status: 400 });
         }
       } catch (e) {
-        if (timedOut) await guardedSetRoom(code, room); // 超時判定的結果仍要保存
+        if (timedOut) await guardedSetRoom(code, room);
         return NextResponse.json({ error: safeErrorCode(e) }, { status: 409 });
       }
 

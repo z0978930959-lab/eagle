@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRoom, viewFor } from '../../../../lib/gameLogic';
 import { createBingoRoom, bingoViewFor } from '../../../../lib/bingoLogic';
-import { createSplendorRoom, splendorViewFor } from '../../../../lib/splendorLogic';
+import { gameByMode } from '../../../../lib/gameRegistry';
 import { createRoomIfAbsent, storeReady, rateLimit } from '../../../../lib/store';
 import { safeErrorCode, errorResponseInfo } from '../../../../lib/apiError';
 import { clientIp } from '../../../../lib/clientIp';
@@ -9,7 +9,6 @@ import { clientIp } from '../../../../lib/clientIp';
 export const dynamic = 'force-dynamic';
 
 function genCode() {
-  // 使用 CSPRNG 產生房號，避免被推算
   if (globalThis.crypto?.getRandomValues) {
     const buf = new Uint32Array(1);
     globalThis.crypto.getRandomValues(buf);
@@ -23,7 +22,6 @@ export async function POST(req) {
     return NextResponse.json({ error: 'NO_STORE', message: '尚未設定資料庫，請依 README 連接 Upstash Redis' }, { status: 500 });
   }
 
-  // 每個 IP 每分鐘最多建 5 房、每小時最多 20 房，避免灌爆 4 位數房號池
   const ip = clientIp(req);
   const minuteRl = await rateLimit('create-min', ip, 5, 60);
   const hourRl = await rateLimit('create-hr', ip, 20, 3600);
@@ -37,37 +35,47 @@ export async function POST(req) {
   } catch {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
-  const { innings, teamId, extraMode, mode, reveal, cor, players } = body || {};
+  const { innings, teamId, extraMode, mode, reveal, cor, players, seriesMode } = body || {};
+
   const isBingo = mode === 'bingo';
-  const isSplendor = mode === 'splendor';
-  if (!isBingo && !isSplendor && (![1, 3].includes(innings) || typeof teamId !== 'string' || (extraMode && !['cpbl', 'tiebreak'].includes(extraMode)))) {
+  const game = gameByMode(mode); // 註冊表中的連線遊戲（splendor/mission/poker/ecard）
+  const isBaseball = !isBingo && !game;
+
+  if (isBaseball && (![1, 3].includes(innings) || typeof teamId !== 'string' || (extraMode && !['cpbl', 'tiebreak'].includes(extraMode)))) {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
+
+  const validSeries = ['BO1', 'BO3', 'BO5'].includes(seriesMode) ? seriesMode : 'BO1';
 
   for (let i = 0; i < 30; i++) {
     const code = genCode();
     let room;
     try {
-      room = isSplendor
-        ? createSplendorRoom({ code, players: players === 3 ? 3 : 2 })
-        : isBingo
-          ? createBingoRoom({ code, reveal: !!reveal })
-          : createRoom({ code, innings, awayTeamId: teamId, extraMode, cor });
+      if (game) {
+        room = game.create({ code, players: players === 3 ? 3 : 2, seriesMode: validSeries });
+      } else if (isBingo) {
+        room = createBingoRoom({ code, reveal: !!reveal });
+      } else {
+        room = createRoom({ code, innings, awayTeamId: teamId, extraMode, cor });
+      }
     } catch (e) {
       return NextResponse.json({ error: safeErrorCode(e) }, { status: 400 });
     }
 
     try {
       if (await createRoomIfAbsent(code, room)) {
-        return NextResponse.json({
-          code,
-          token: isSplendor ? room.tokens.s0 : room.tokens.away,
-          view: isSplendor
-            ? splendorViewFor(room, 's0')
-            : isBingo
-              ? bingoViewFor(room, 'away')
-              : viewFor(room, 'away'),
-        });
+        let token, view;
+        if (game) {
+          token = room.tokens[game.hostSeat];
+          view = game.viewFor(room, game.hostSeat);
+        } else if (isBingo) {
+          token = room.tokens.away;
+          view = bingoViewFor(room, 'away');
+        } else {
+          token = room.tokens.away;
+          view = viewFor(room, 'away');
+        }
+        return NextResponse.json({ code, token, view });
       }
     } catch (e) {
       const info = errorResponseInfo(e);

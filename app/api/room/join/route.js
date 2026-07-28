@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
 import { joinRoom, viewFor } from '../../../../lib/gameLogic';
 import { joinBingoRoom, bingoViewFor } from '../../../../lib/bingoLogic';
-import { joinSplendorRoom, splendorViewFor } from '../../../../lib/splendorLogic';
+import { gameByMode, gameByRoom } from '../../../../lib/gameRegistry';
 import { getRoom, storeReady, withRoomLock, assertCode, rateLimit } from '../../../../lib/store';
 import { safeErrorCode, errorResponseInfo } from '../../../../lib/apiError';
 import { clientIp } from '../../../../lib/clientIp';
 
 export const dynamic = 'force-dynamic';
 
+const MODE_LABEL = { bingo: '賓果', baseball: '棒球', splendor: '璀璨寶石', mission: '密語連線', poker: '17 撲克', ecard: 'E 卡' };
+
 export async function POST(req) {
   if (!storeReady()) {
     return NextResponse.json({ error: 'NO_STORE', message: '尚未設定資料庫' }, { status: 500 });
   }
 
-  // 加入房間也要 rate limit，避免用 4 位數房號池被枚舉搶進他人房間
   const ip = clientIp(req);
   const minuteRl = await rateLimit('join-min', ip, 20, 60);
   const hourRl = await rateLimit('join-hr', ip, 200, 3600);
@@ -29,8 +30,10 @@ export async function POST(req) {
   }
   const { code, teamId, mode } = body || {};
   const isBingo = mode === 'bingo';
-  const isSplendor = mode === 'splendor';
-  if (!isBingo && !isSplendor && typeof teamId !== 'string') {
+  const game = gameByMode(mode);
+  const isBaseball = !isBingo && !game;
+
+  if (isBaseball && typeof teamId !== 'string') {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
   try {
@@ -44,24 +47,28 @@ export async function POST(req) {
       const room = await getRoom(code);
       if (!room) return NextResponse.json({ error: 'NOT_FOUND', message: '找不到這個房號' }, { status: 404 });
       if (room.status !== 'waiting') return NextResponse.json({ error: 'ROOM_FULL', message: '房間已滿或比賽已開始' }, { status: 409 });
-      // 三種遊戲共用房號池：模式對不上就擋（避免用錯的介面誤入他人房間）
-      const roomMode = room.type === 'bingo' ? 'bingo' : room.type === 'splendor' ? 'splendor' : 'baseball';
-      const wantMode = isSplendor ? 'splendor' : isBingo ? 'bingo' : 'baseball';
+
+      // 共用房號池：模式對不上就擋
+      const roomMode = room.type === 'bingo' ? 'bingo' : gameByRoom(room) ? room.type : 'baseball';
+      const wantMode = game ? mode : isBingo ? 'bingo' : 'baseball';
       if (roomMode !== wantMode) {
-        const label = { bingo: '賓果', splendor: '璀璨寶石', baseball: '棒球' }[roomMode];
+        const label = MODE_LABEL[roomMode] || roomMode;
         return NextResponse.json({ error: 'WRONG_MODE', message: `這是${label}房，請從${label}模式加入` }, { status: 409 });
       }
-      if (isSplendor) {
+
+      // 註冊表遊戲：統一分派
+      if (game) {
         let seat, token;
         try {
-          ({ seat, token } = joinSplendorRoom(room));
+          ({ seat, token } = game.join(room));
         } catch (e) {
           const info = errorResponseInfo(e);
           return NextResponse.json({ error: info.code, message: info.message }, { status: info.status });
         }
         await guardedSetRoom(code, room);
-        return NextResponse.json({ code, token, view: splendorViewFor(room, seat) });
+        return NextResponse.json({ code, token, view: game.viewFor(room, seat) });
       }
+
       if (isBingo) {
         try {
           joinBingoRoom(room);
@@ -71,10 +78,10 @@ export async function POST(req) {
         await guardedSetRoom(code, room);
         return NextResponse.json({ code, token: room.tokens.home, view: bingoViewFor(room, 'home') });
       }
+
       if (teamId === room.awayTeamId) {
         return NextResponse.json({ error: 'TEAM_TAKEN', message: '對方已選這支球隊，請換一隊' }, { status: 409 });
       }
-
       try {
         joinRoom(room, teamId);
       } catch (e) {

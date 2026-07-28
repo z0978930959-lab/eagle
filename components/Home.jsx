@@ -4,6 +4,10 @@ import { useState } from 'react';
 import Game from './Game';
 import Bingo from './Bingo';
 import Splendor from './Splendor';
+import Mission from './Mission';
+import Poker from './Poker';
+import Ecard from './Ecard';
+import Tournament from './Tournament';
 
 /* 遊戲入口：選擇棒球對戰、賓果對決或璀璨寶石。
  * 進入遊戲後左上角有「⌂」可回到選單（對局進度存在 sessionStorage，
@@ -28,15 +32,48 @@ const MODES = [
     title: '璀璨寶石',
     desc: '收寶石、養折扣、搶貴族——雙人規則，先到 15 分致勝',
   },
+  {
+    key: 'mission',
+    icon: '🔗',
+    title: '密語連線',
+    desc: '雙人合作猜詞——輪流給提示，找齊關鍵人物、閃避炸彈客',
+  },
+  {
+    key: 'poker',
+    icon: '🃏',
+    title: '17 張撲克',
+    desc: 'JQKA＋鬼牌——下注、換牌、比牌型，六回合定勝負',
+  },
+  {
+    key: 'ecard',
+    icon: '👑',
+    title: 'E 卡',
+    desc: '皇帝奴隸市民三者相剋——心理博弈，賭一把翻盤',
+  },
+  {
+    key: 'tournament',
+    icon: '🏆',
+    title: '綜合比賽',
+    desc: '賓果＋E卡＋17撲克隨機三場——先贏兩場者奪冠',
+  },
 ];
 
 export default function Home() {
   const [mode, setMode] = useState(null); // null | 'baseball' | 'bingo' | 'splendor'
 
   if (mode) {
+    const screen = {
+      baseball: <Game />,
+      bingo: <Bingo />,
+      splendor: <Splendor />,
+      mission: <Mission />,
+      poker: <Poker />,
+      ecard: <Ecard />,
+      tournament: <Tournament />,
+    }[mode];
     return (
       <div className="relative">
-        {mode === 'baseball' ? <Game /> : mode === 'bingo' ? <Bingo /> : <Splendor />}
+        {screen}
         <button
           onClick={() => setMode(null)}
           title="回遊戲選單（對局會保留）"

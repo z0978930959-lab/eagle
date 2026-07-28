@@ -116,3 +116,52 @@ body {
   @keyframes spCoinSpin { 0%,100% { transform: none; } }
   @keyframes spCoinIdle { 0%,100% { transform: none; } }
 }
+
+/* 密語連線：翻牌慢後快（前半慢轉、快看到正面時猛翻） */
+@keyframes msFlip {
+  0%   { transform: rotateY(0deg);   filter: brightness(1); }
+  55%  { transform: rotateY(72deg);  filter: brightness(0.7); }
+  70%  { transform: rotateY(88deg);  filter: brightness(0.5); }
+  100% { transform: rotateY(0deg);   filter: brightness(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes msFlip { 0%,100% { transform: none; filter: none; } }
+}
+
+/* 17 撲克 / E 卡：翻牌慢後快 */
+@keyframes pkFlip {
+  0%{transform:rotateY(0deg);filter:brightness(1);}
+  55%{transform:rotateY(72deg);filter:brightness(0.7);}
+  70%{transform:rotateY(90deg);filter:brightness(0.4);}
+  100%{transform:rotateY(0deg);filter:brightness(1);}
+}
+@keyframes ecFlip {
+  0%{transform:rotateY(0deg);filter:brightness(1);}
+  55%{transform:rotateY(72deg);filter:brightness(0.7);}
+  70%{transform:rotateY(90deg);filter:brightness(0.4);}
+  100%{transform:rotateY(0deg);filter:brightness(1);}
+}
+/* E 卡貼圖：彈入 → 停留 → 淡出（總 3 秒）*/
+@keyframes stickerPop {
+  0%{transform:scale(0.3) translateY(20px);opacity:0;}
+  10%{transform:scale(1.1) translateY(0);opacity:1;}
+  18%{transform:scale(1);opacity:1;}
+  85%{transform:scale(1);opacity:1;}
+  100%{transform:scale(0.9);opacity:0;}
+}
+/* 生死局梗圖 */
+@keyframes memePop {
+  0%{transform:scale(0.4) rotate(-6deg);opacity:0;}
+  60%{transform:scale(1.08) rotate(2deg);opacity:1;}
+  100%{transform:scale(1) rotate(0);opacity:1;}
+}
+@keyframes memePulse {
+  0%{opacity:0;}
+  12%{opacity:1;}
+  80%{opacity:1;}
+  100%{opacity:0;}
+}
+@media (prefers-reduced-motion: reduce){
+  @keyframes pkFlip{0%,100%{transform:none;filter:none;}}
+  @keyframes ecFlip{0%,100%{transform:none;filter:none;}}
+}
