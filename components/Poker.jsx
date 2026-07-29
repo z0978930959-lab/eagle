@@ -134,6 +134,7 @@ export default function Poker() {
   const [selDiscards, setSelDiscards] = useState([]);
   const [raiseAmt, setRaiseAmt] = useState(1);
   const [showFlip, setShowFlip] = useState(false);
+  const [showGameOver, setShowGameOver] = useState(false);
   const pollRef = useRef(null);
   const lastSeq = useRef(0);
   const eggRef = useRef(Math.random() < 0.4); // 本裝置此局的紅心A彩蛋旗標
@@ -169,6 +170,15 @@ export default function Poker() {
     }
     if (view?.seq) lastSeq.current = Math.max(lastSeq.current, view.seq);
   }, [view?.seq, view?.round_state?.reveal]);
+
+  // 一場結束時，先讓翻牌與牌型顯示，延遲 1.6 秒再跳結算框
+  useEffect(() => {
+    if (view?.phase === 'gameover') {
+      const t = setTimeout(() => setShowGameOver(true), 1600);
+      return () => clearTimeout(t);
+    }
+    setShowGameOver(false);
+  }, [view?.phase, view?.series?.gameNo]);
 
   function enter(code, token, v) { ss.save(code, token); setSession({ code, token }); setView(v); setLobbyErr(''); }
   function leave() { ss.clear(); setSession(null); setView(null); }
@@ -315,7 +325,7 @@ export default function Poker() {
       {v.series?.matchPoint && <MatchPointMeme />}
 
       {/* 一場結束（系列未結束）*/}
-      {gameOver && !seriesOver && (
+      {gameOver && !seriesOver && showGameOver && (
         <div className="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-6">
           <div className="w-full max-w-sm rounded-2xl border border-field-chalk/20 bg-[#161009] p-7 text-center">
             <div className="font-display text-2xl font-black mb-2" style={{ color: v.iWon ? '#f5cf6a' : '#e88' }}>
@@ -333,7 +343,7 @@ export default function Poker() {
       )}
 
       {/* 系列賽結束 */}
-      {seriesOver && (
+      {seriesOver && showGameOver && (
         <div className="fixed inset-0 z-[70] bg-black/88 flex items-center justify-center p-6">
           <div className="w-full max-w-sm rounded-2xl border border-field-floodlight/30 bg-[#161009] p-7 text-center">
             <div className="text-5xl mb-3">{v.series.champion === v.role ? '🏆' : '🥈'}</div>

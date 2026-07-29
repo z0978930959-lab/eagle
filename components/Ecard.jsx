@@ -114,6 +114,7 @@ export default function Ecard() {
   const [stakeVal, setStakeVal] = useState(1);
   const [flip, setFlip] = useState(false);
   const [sticker, setSticker] = useState(null); // { role, name }
+  const [showGameOver, setShowGameOver] = useState(false);
   const pollRef = useRef(null);
   const lastTrickSeq = useRef(0);
   const lastStickerSeq = useRef(0);
@@ -153,6 +154,15 @@ export default function Ecard() {
       return () => clearTimeout(t);
     }
   }, [view?.lastSticker?.seq]);
+
+  // 一場結束時，先讓最後一輪結果顯示，延遲 1.4 秒再跳結算框
+  useEffect(() => {
+    if (view?.phase === 'gameover') {
+      const t = setTimeout(() => setShowGameOver(true), 1400);
+      return () => clearTimeout(t);
+    }
+    setShowGameOver(false);
+  }, [view?.phase, view?.series?.gameNo]);
 
   function enter(code, token, v) { ss.save(code, token); setSession({ code, token }); setView(v); setLobbyErr(''); }
   function leave() { ss.clear(); setSession(null); setView(null); }
@@ -298,7 +308,7 @@ export default function Ecard() {
       {v.series?.matchPoint && <MatchPointMeme />}
 
       {/* 一場結束 */}
-      {gameOver && !seriesOver && (
+      {gameOver && !seriesOver && showGameOver && (
         <div className="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-6">
           <div className="w-full max-w-sm rounded-2xl border border-field-chalk/20 bg-[#120c1a] p-7 text-center">
             <div className="font-display text-2xl font-black mb-2" style={{ color: v.iWon ? '#f5cf6a' : '#e88' }}>
@@ -312,7 +322,7 @@ export default function Ecard() {
         </div>
       )}
 
-      {seriesOver && (
+      {seriesOver && showGameOver && (
         <div className="fixed inset-0 z-[70] bg-black/88 flex items-center justify-center p-6">
           <div className="w-full max-w-sm rounded-2xl border border-field-floodlight/30 bg-[#120c1a] p-7 text-center">
             <div className="text-5xl mb-3">{v.series.champion === v.role ? '🏆' : '🥈'}</div>
