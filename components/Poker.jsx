@@ -123,6 +123,68 @@ function Lobby({ onEnter, initialError }) {
   );
 }
 
+/* ---------------- 牌型示範面板 ---------------- */
+
+// 8 種牌型的示範牌組（由大到小），用實際牌面圖展示
+const HAND_DEMOS = [
+  { name: '帶鬼牌五條', cards: [{ suit: 3, rank: 3 }, { suit: 2, rank: 3 }, { suit: 1, rank: 3 }, { suit: 0, rank: 3 }, { joker: true }] },
+  { name: '帶鬼牌同花順', cards: [{ suit: 2, rank: 0 }, { suit: 2, rank: 1 }, { suit: 2, rank: 2 }, { suit: 2, rank: 3 }, { joker: true }] },
+  { name: '四條', cards: [{ suit: 3, rank: 2 }, { suit: 2, rank: 2 }, { suit: 1, rank: 2 }, { suit: 0, rank: 2 }, { suit: 3, rank: 0 }] },
+  { name: '葫蘆', cards: [{ suit: 3, rank: 3 }, { suit: 2, rank: 3 }, { suit: 1, rank: 3 }, { suit: 3, rank: 1 }, { suit: 2, rank: 1 }] },
+  { name: '順子', cards: [{ joker: true }, { suit: 0, rank: 0 }, { suit: 1, rank: 1 }, { suit: 2, rank: 2 }, { suit: 3, rank: 3 }] },
+  { name: '三條', cards: [{ suit: 3, rank: 3 }, { suit: 2, rank: 3 }, { suit: 1, rank: 3 }, { suit: 3, rank: 1 }, { suit: 2, rank: 0 }] },
+  { name: '兩對', cards: [{ suit: 3, rank: 3 }, { suit: 2, rank: 3 }, { suit: 3, rank: 2 }, { suit: 2, rank: 2 }, { suit: 1, rank: 0 }] },
+  { name: '一對', cards: [{ suit: 3, rank: 3 }, { suit: 2, rank: 3 }, { suit: 3, rank: 2 }, { suit: 2, rank: 1 }, { suit: 1, rank: 0 }] },
+];
+
+function MiniCard({ card }) {
+  return (
+    <div className="w-6 aspect-[5/7] rounded overflow-hidden shrink-0">
+      <img src={cardSrc(card, false)} alt="" className="w-full h-full object-contain bg-[#0d1016]" />
+    </div>
+  );
+}
+
+function HandRankPanel({ current }) {
+  return (
+    <div className="rounded-xl border border-field-chalk/12 bg-black/25 p-3">
+      <div className="text-[11px] tracking-wider text-field-chalk/50 mb-2 text-center">牌型大小（大 → 小）</div>
+      <div className="space-y-1.5">
+        {HAND_DEMOS.map((h, i) => {
+          const active = current === h.name;
+          return (
+            <div key={h.name} className={`flex items-center gap-2 rounded-lg px-1.5 py-1 ${active ? 'bg-field-floodlight/15 ring-1 ring-field-floodlight/50' : ''}`}>
+              <span className="font-mono text-[10px] text-field-chalk/30 w-3">{i + 1}</span>
+              <div className="flex gap-0.5">{h.cards.map((c, j) => <MiniCard key={j} card={c} />)}</div>
+              <span className={`text-[10px] ml-auto ${active ? 'text-field-floodlight font-bold' : 'text-field-chalk/55'}`}>{h.name}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- 貼圖列 ---------------- */
+
+const PK_STICKER_LABELS = [['taunt_1', '超大貓'], ['taunt_2', '好大'], ['taunt_3', '大概這麼大吧']];
+
+function StickerBar({ onSend, busy }) {
+  return (
+    <div>
+      <div className="text-[10px] text-field-chalk/35 mb-1 text-center">嘲諷貼圖（2 秒內不能連點）</div>
+      <div className="flex justify-center gap-2">
+        {PK_STICKER_LABELS.map(([key, label]) => (
+          <button key={key} onClick={() => onSend(key)} disabled={busy}
+            className="w-12 h-12 rounded-lg border border-field-chalk/15 bg-black/30 hover:border-field-floodlight overflow-hidden" title={label}>
+            <img src={`/poker/stickers/${key}.png`} alt={label} className="w-full h-full object-cover" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- 主元件 ---------------- */
 
 export default function Poker() {
@@ -135,7 +197,12 @@ export default function Poker() {
   const [raiseAmt, setRaiseAmt] = useState(1);
   const [showFlip, setShowFlip] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
+  const [sticker, setSticker] = useState(null); // 對手貼圖顯示
+  const [showPanel, setShowPanel] = useState(false); // 手機版牌型面板收展
+  const [goldSide, setGoldSide] = useState(null); // 開牌後亮金邊的一方 'me'|'opp'
   const pollRef = useRef(null);
+  const lastStickerSeq = useRef(0);
+  const showdownSeq = useRef(0);
   const lastSeq = useRef(0);
   const eggRef = useRef(Math.random() < 0.4); // 本裝置此局的紅心A彩蛋旗標
 
@@ -180,6 +247,36 @@ export default function Poker() {
     setShowGameOver(false);
   }, [view?.phase, view?.series?.gameNo]);
 
+  // 對手貼圖：顯示 2 秒
+  useEffect(() => {
+    const s = view?.lastSticker;
+    if (s && s.seq > lastStickerSeq.current) {
+      lastStickerSeq.current = s.seq;
+      setSticker(s);
+      const t = setTimeout(() => setSticker(null), 2000);
+      return () => clearTimeout(t);
+    }
+  }, [view?.lastSticker?.seq]);
+
+  // 開牌決勝：先翻牌 → 1 秒後勝方亮金邊 → 再自動推進下一回合
+  useEffect(() => {
+    const rs = view?.round_state;
+    if (rs?.showdownHold && view.seq > showdownSeq.current) {
+      showdownSeq.current = view.seq;
+      setGoldSide(null);
+      // 1 秒後亮金邊（勝方），平手不亮
+      const t1 = setTimeout(() => {
+        if (rs.roundWinner) setGoldSide(rs.iWonRound ? 'me' : 'opp');
+      }, 1000);
+      // 動畫看完（約 2.4 秒）自動送出推進；雙方都送才會進下一回合
+      const t2 = setTimeout(() => {
+        setGoldSide(null);
+        act('pk_next_round');
+      }, 2400);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+  }, [view?.seq, view?.round_state?.showdownHold]);
+
   function enter(code, token, v) { ss.save(code, token); setSession({ code, token }); setView(v); setLobbyErr(''); }
   function leave() { ss.clear(); setSession(null); setView(null); }
 
@@ -216,8 +313,16 @@ export default function Poker() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#1c1712] via-[#14100c] to-[#0a0806] pb-24">
-      <div className="max-w-2xl mx-auto px-3 sm:px-5 pt-4">
-        {/* 頂列 */}
+      <div className="max-w-5xl mx-auto px-3 sm:px-5 pt-4 flex gap-4">
+        {/* 左側牌型面板（桌機固定） */}
+        <aside className="hidden xl:block w-52 shrink-0">
+          <div className="sticky top-4">
+            <HandRankPanel current={rs?.myHandType} />
+          </div>
+        </aside>
+
+        <div className="flex-1 min-w-0 max-w-2xl mx-auto">
+          {/* 頂列 */}
         <div className="flex items-center justify-between gap-3 pb-3 mb-3 border-b border-field-chalk/12">
           <div className="flex items-baseline gap-3">
             <span className="font-display text-lg font-bold text-field-chalk">17 張撲克</span>
@@ -247,7 +352,7 @@ export default function Poker() {
               <div className="text-[10px] text-field-chalk/40 mb-1">
                 對手手牌{rs.drawn.opp !== null && `　（換了 ${rs.drawn.opp} 張）`}
               </div>
-              <div className="flex justify-center gap-1.5">
+              <div className={`flex justify-center gap-1.5 ${goldSide === 'opp' ? 'pk-win-glow p-1' : ''}`}>
                 {(rs.reveal ? rs.reveal.opp.hand : Array.from({ length: rs.oppHandCount })).map((c, i) => (
                   <CardImg key={i} card={rs.reveal ? c : null} faceDown={!rs.reveal} eggFlag={eggRef.current} flip={showFlip && rs.reveal} small />
                 ))}
@@ -269,7 +374,7 @@ export default function Poker() {
                 {rs.stage === 'draw' && rs.myTurn && '　（點選要換掉的牌）'}
                 {rs.drawn.me !== null && `　換了 ${rs.drawn.me} 張`}
               </div>
-              <div className="flex justify-center gap-1.5">
+              <div className={`flex justify-center gap-1.5 ${goldSide === 'me' ? 'pk-win-glow p-1' : ''}`}>
                 {rs.myHand?.map((c, i) => {
                   const sel = selDiscards.includes(i);
                   const pickable = rs.stage === 'draw' && rs.myTurn && rs.drawn.me === null;
@@ -285,7 +390,16 @@ export default function Poker() {
                   );
                 })}
               </div>
-              {rs.reveal && <div className="text-sm text-field-floodlight font-bold mt-1">{rs.reveal.me.name}</div>}
+              {rs.reveal ? (
+                <div className="text-sm text-field-floodlight font-bold mt-1">{rs.reveal.me.name}</div>
+              ) : (
+                rs.myHandType && (
+                  <div className="text-xs mt-1">
+                    <span className="text-field-chalk/40">目前牌型：</span>
+                    <span className="text-field-floodlight font-bold">{rs.myHandType}</span>
+                  </div>
+                )
+              )}
             </div>
 
             {/* 操作區 */}
@@ -318,9 +432,32 @@ export default function Poker() {
           </div>
         )}
 
+        {/* 貼圖列 */}
+        {v.phase !== 'waiting' && (
+          <div className="mt-4">
+            <StickerBar onSend={(name) => act('pk_sticker', { name })} busy={busy} />
+          </div>
+        )}
+
+        {/* 手機版牌型面板（可收展） */}
+        <div className="xl:hidden mt-4">
+          <button onClick={() => setShowPanel((p) => !p)}
+            className="w-full py-2 rounded-lg border border-field-chalk/15 bg-black/25 text-field-chalk/60 text-xs">
+            {showPanel ? '▲ 收起牌型表' : '▼ 查看牌型大小表'}
+          </button>
+          {showPanel && <div className="mt-2"><HandRankPanel current={rs?.myHandType} /></div>}
+        </div>
+
         <button onClick={leave} className="mt-6 text-field-chalk/30 text-[11px] underline underline-offset-4">離開房間</button>
       </div>
+      </div>
 
+      {/* 對手貼圖顯示（2 秒） */}
+      {sticker && sticker.role !== v.role && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60]" style={{ animation: 'stickerPop 2s ease-out both' }}>
+          <img src={`/poker/stickers/${sticker.name}.png`} alt="" className="w-28 h-28 object-contain drop-shadow-2xl" />
+        </div>
+      )}
       {/* 生死局梗圖 */}
       {v.series?.matchPoint && <MatchPointMeme />}
 
@@ -370,12 +507,19 @@ export default function Poker() {
 function BetControls({ rs, busy, raiseAmt, setRaiseAmt, onAct, chips }) {
   const toCall = rs.toCall;
   const cap = rs.stage === 'bet1' ? rs.betCaps.bet1 : rs.betCaps.bet2;
-  const maxRaise = Math.min(cap, chips - Math.max(0, toCall));
+  // 當前注額 = 雙方本回合已投入的較大者
+  const curLevel = Math.max(rs.bets.me, rs.bets.opp);
+  // 加注目標範圍：(當前注額, 上限]，且補差額不超過自己剩餘籌碼
+  const maxTarget = Math.min(cap, rs.bets.me + chips);
+  const canRaise = maxTarget > curLevel;
+  const minTarget = curLevel + 1;
+  const target = Math.max(minTarget, Math.min(raiseAmt, maxTarget));
 
   return (
     <div className="space-y-2">
       <div className="text-center text-[11px] text-field-chalk/45">
-        {rs.stage === 'bet1' ? '第一次下注（上限 10）' : '第二次下注（上限 15）'}
+        {rs.stage === 'bet1' ? '第一次下注（注額上限 10）' : '第二次下注（注額上限 15）'}
+        {curLevel > 0 && <span className="text-field-chalk/60">　目前注額 {curLevel}</span>}
         {toCall > 0 && <span className="text-field-floodlight">　需跟注 {toCall}</span>}
       </div>
       <div className="flex gap-2">
@@ -391,14 +535,14 @@ function BetControls({ rs, busy, raiseAmt, setRaiseAmt, onAct, chips }) {
             className="flex-1 py-2 rounded-lg border border-field-chalk/25 text-field-chalk/70 text-sm">過牌</button>
         )}
       </div>
-      {maxRaise >= 1 && (
+      {canRaise && (
         <div className="flex items-center gap-2">
-          <input type="range" min={1} max={maxRaise} value={Math.min(raiseAmt, maxRaise)}
+          <input type="range" min={minTarget} max={maxTarget} value={target}
             onChange={(e) => setRaiseAmt(Number(e.target.value))} className="flex-1 accent-[#f5cf6a]" />
-          <span className="font-mono text-sm text-field-floodlight w-8 text-center">{Math.min(raiseAmt, maxRaise)}</span>
-          <button onClick={() => onAct('pk_bet', { move: toCall > 0 ? 'raise' : 'bet', amount: Math.min(raiseAmt, maxRaise) })} disabled={busy}
+          <span className="font-mono text-sm text-field-floodlight w-10 text-center">加到{target}</span>
+          <button onClick={() => onAct('pk_bet', { move: toCall > 0 ? 'raise' : 'bet', amount: target })} disabled={busy}
             className="px-4 py-2 rounded-lg border border-field-floodlight/60 text-field-floodlight text-sm">
-            {toCall > 0 ? '加注' : '下注'}
+            {curLevel > 0 ? '加注' : '下注'}
           </button>
         </div>
       )}

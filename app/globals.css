@@ -165,3 +165,14 @@ body {
   @keyframes pkFlip{0%,100%{transform:none;filter:none;}}
   @keyframes ecFlip{0%,100%{transform:none;filter:none;}}
 }
+
+/* 撲克 / E 卡：決勝勝方亮金邊 */
+@keyframes pkWinGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(245,207,106,0); }
+  30%  { box-shadow: 0 0 18px 4px rgba(245,207,106,0.9), inset 0 0 0 3px rgba(245,207,106,0.9); }
+  100% { box-shadow: 0 0 12px 2px rgba(245,207,106,0.7), inset 0 0 0 3px rgba(245,207,106,0.85); }
+}
+.pk-win-glow { animation: pkWinGlow 700ms ease-out both; border-radius: 0.5rem; }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes pkWinGlow { 0%,100% { box-shadow: inset 0 0 0 3px rgba(245,207,106,0.85); } }
+}

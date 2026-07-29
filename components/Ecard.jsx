@@ -113,6 +113,7 @@ export default function Ecard() {
   const [lobbyErr, setLobbyErr] = useState('');
   const [stakeVal, setStakeVal] = useState(1);
   const [flip, setFlip] = useState(false);
+  const [goldSide, setGoldSide] = useState(null); // 分勝負後亮金邊的一方 'me'|'opp'
   const [sticker, setSticker] = useState(null); // { role, name }
   const [showGameOver, setShowGameOver] = useState(false);
   const pollRef = useRef(null);
@@ -134,15 +135,26 @@ export default function Ecard() {
     return () => clearInterval(pollRef.current);
   }, [session, refresh]);
 
-  // 翻牌動畫：雙方都出牌時
+  // 翻牌動畫：雙方都出牌時，慢動作翻牌；分勝負則 1 秒後勝方亮金邊
   useEffect(() => {
     if (view?.r?.bothPlayed && view.seq > lastTrickSeq.current) {
       lastTrickSeq.current = view.seq;
       setFlip(true);
+      setGoldSide(null);
       const t = setTimeout(() => setFlip(false), 600);
-      return () => clearTimeout(t);
+      // 分出勝負（進入 roundEnd 且有勝方）→ 1 秒後在勝方的牌亮金邊
+      let t2;
+      if (view.phase === 'roundEnd' && view.r?.winner) {
+        t2 = setTimeout(() => setGoldSide(view.r.winner === view.role ? 'me' : 'opp'), 1000);
+      }
+      return () => { clearTimeout(t); if (t2) clearTimeout(t2); };
     }
   }, [view?.seq, view?.r?.bothPlayed]);
+
+  // 離開回合結束畫面時清掉金邊
+  useEffect(() => {
+    if (view?.phase !== 'roundEnd') setGoldSide(null);
+  }, [view?.phase]);
 
   // 對手貼圖：顯示 3 秒
   useEffect(() => {
@@ -245,21 +257,23 @@ export default function Ecard() {
               </div>
             </div>
 
-            {/* 中央對戰區 */}
-            {v.phase === 'play' && (
+            {/* 中央對戰區（出牌中與分勝負後都顯示，分勝負時勝方亮金邊） */}
+            {(v.phase === 'play' || v.phase === 'roundEnd') && (
               <div className="my-4 py-3 rounded-xl border border-field-chalk/12 bg-black/25 text-center">
                 <div className="text-[11px] text-field-chalk/45 mb-2">
-                  第 {r.trick + 1} 輪　·　{r.firstPlayer === v.role ? '你' : '對手'}先出
+                  {v.phase === 'roundEnd'
+                    ? (r.winnerSide === 'emperor' ? '皇帝方勝' : '奴隸方勝')
+                    : `第 ${r.trick + 1} 輪　·　${r.firstPlayer === v.role ? '你' : '對手'}先出`}
                 </div>
                 <div className="flex justify-center items-center gap-8">
                   <div>
                     <div className="text-[10px] text-field-chalk/40 mb-1">你出的</div>
-                    {r.myPlayed ? <Card role={r.myPlayed} flip={flip} /> : <div className="w-16 sm:w-20 aspect-[5/7] rounded-lg border-2 border-dashed border-field-chalk/20" />}
+                    {r.myPlayed ? <div className={goldSide === 'me' ? 'pk-win-glow' : ''}><Card role={r.myPlayed} flip={flip} /></div> : <div className="w-16 sm:w-20 aspect-[5/7] rounded-lg border-2 border-dashed border-field-chalk/20" />}
                   </div>
                   <div className="text-field-chalk/30 text-2xl">VS</div>
                   <div>
                     <div className="text-[10px] text-field-chalk/40 mb-1">對手出的</div>
-                    {r.oppPlayed && r.oppPlayed !== 'hidden' ? <Card role={r.oppPlayed} flip={flip} />
+                    {r.oppPlayed && r.oppPlayed !== 'hidden' ? <div className={goldSide === 'opp' ? 'pk-win-glow' : ''}><Card role={r.oppPlayed} flip={flip} /></div>
                       : r.oppPlayed === 'hidden' ? <Card faceDown />
                         : <div className="w-16 sm:w-20 aspect-[5/7] rounded-lg border-2 border-dashed border-field-chalk/20" />}
                   </div>
@@ -298,10 +312,11 @@ export default function Ecard() {
         <button onClick={leave} className="mt-6 text-field-chalk/30 text-[11px] underline underline-offset-4">離開房間</button>
       </div>
 
-      {/* 對手貼圖顯示（3 秒）*/}
-      {sticker && sticker.role !== v.role && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[60]" style={{ animation: 'stickerPop 3s ease-out both' }}>
-          <img src={`/ecard/sticker_${sticker.name}.png`} alt="" className="w-28 h-28 object-contain drop-shadow-2xl" />
+      {/* 貼圖顯示（雙方都顯示，放大兩倍）*/}
+      {sticker && (
+        <div className={`fixed z-[60] ${sticker.role === v.role ? 'bottom-24 right-6' : 'bottom-24 left-6'}`} style={{ animation: 'stickerPop 3s ease-out both' }}>
+          <img src={`/ecard/sticker_${sticker.name}.png`} alt="" className="w-56 h-56 object-contain drop-shadow-2xl" />
+          <div className="text-center text-[11px] text-field-chalk/60 mt-1">{sticker.role === v.role ? '你' : '對手'}</div>
         </div>
       )}
 
