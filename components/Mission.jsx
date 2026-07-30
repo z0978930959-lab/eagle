@@ -32,7 +32,7 @@ const ROLE_COLOR = {
   bomb: { solid: '#c9484f', soft: 'rgba(201,72,79,0.20)', label: '炸彈' },
 };
 const roleImg = (role, n) => `/mission/${role === 'key' ? 'key' : role === 'civ' ? 'civilian' : 'bomb'}_${n}.png`;
-const MS_STICKERS = [['taunt_1', '柴犬'], ['taunt_2', '哈士奇'], ['taunt_3', '你這隻豬']];
+const MS_STICKERS = [['taunt_1', '柴犬'], ['taunt_2', '哈士奇'], ['taunt_3', '你這隻豬'], ['taunt_4', '要那個幹什麼']];
 
 /* ---------------- 格子 ---------------- */
 
@@ -213,11 +213,11 @@ export default function Mission() {
   function leave() { ss.clear(); setSession(null); setView(null); }
 
   async function act(action, payload) {
-    if (busy && action !== 'ms_sticker') return;
+    if (busy && action !== 'ms_sticker') return false;
     if (action !== 'ms_sticker') setBusy(true);
     setMsg('');
-    try { const d = await api('/api/room/action', { ...session, action, payload }); setView(d.view); }
-    catch (e) { setMsg(e.message); if (e.view) setView(e.view); }
+    try { const d = await api('/api/room/action', { ...session, action, payload }); setView(d.view); return true; }
+    catch (e) { setMsg(e.message); if (e.view) setView(e.view); return false; }
     finally { if (action !== 'ms_sticker') setBusy(false); }
   }
 
@@ -322,7 +322,7 @@ export default function Mission() {
             {v.myTurnToClue ? (
               <div className="flex flex-wrap items-end gap-2">
                 <div className="flex-1 min-w-[140px]">
-                  <div className="text-[10px] text-field-chalk/40 mb-1">提示詞</div>
+                  <div className="text-[10px] text-field-chalk/40 mb-1">提示詞　<span className="text-field-chalk/30">不能用到盤面上出現的字</span></div>
                   <input value={clueWord} onChange={(e) => setClueWord(e.target.value.slice(0, 20))} placeholder="例如：兇猛"
                     className="w-full bg-black/40 border border-field-chalk/20 rounded-lg px-3 py-2 text-field-chalk focus:outline-none focus:border-field-floodlight/60" />
                 </div>
@@ -333,7 +333,12 @@ export default function Mission() {
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </div>
-                <button onClick={() => { if (clueWord.trim()) { act('ms_clue', { word: clueWord.trim(), count: clueCount }); setClueWord(''); } }}
+                <button onClick={async () => {
+                  const w = clueWord.trim();
+                  if (!w) return;
+                  // 只有真的送出成功才清空——被駁回時（例如用到盤面上的字）保留原字，不用重打
+                  if (await act('ms_clue', { word: w, count: clueCount })) setClueWord('');
+                }}
                   disabled={busy || !clueWord.trim()} className="px-5 py-2 rounded-lg border border-field-floodlight/60 text-field-floodlight tracking-wider disabled:opacity-30">送出提示</button>
               </div>
             ) : v.myTurnToGuess ? (
@@ -378,7 +383,7 @@ export default function Mission() {
 
       {/* 貼圖顯示 */}
       {sticker && (
-        <div className={`fixed bottom-24 z-[60] ${sticker.seat === v.seat ? 'right-6' : 'left-6'}`} style={{ animation: 'stickerPop 2s ease-out both' }}>
+        <div className={`fixed bottom-24 z-[60] pointer-events-none ${sticker.seat === v.seat ? 'right-6' : 'left-6'}`} style={{ animation: 'stickerPop 2s ease-out both' }}>
           <img src={`/mission/stickers/${sticker.name}.png`} alt="" className="w-28 h-28 object-contain drop-shadow-2xl" />
         </div>
       )}
@@ -400,7 +405,7 @@ export default function Mission() {
 
       {/* 踩炸彈失敗畫面（花臉貓）*/}
       {isOver && v.result === 'bomb' && showFail && (
-        <div className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-6" style={{ animation: 'memePulse 0.4s ease-out both' }}>
+        <div className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-6" style={{ animation: 'overlayIn 0.4s ease-out both' }}>
           <div className="w-full max-w-md text-center" style={{ animation: 'memePop 500ms cubic-bezier(.34,1.56,.64,1) both' }}>
             <img src="/mission/fail.png" alt="失敗" className="w-full rounded-2xl border-2 border-red-500/40 shadow-2xl mb-4" />
             <div className="font-display text-3xl font-black text-red-300 mb-2">踩到炸彈了…</div>

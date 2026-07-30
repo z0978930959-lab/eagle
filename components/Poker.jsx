@@ -167,13 +167,13 @@ function HandRankPanel({ current }) {
 
 /* ---------------- 貼圖列 ---------------- */
 
-const PK_STICKER_LABELS = [['taunt_1', '超大貓'], ['taunt_2', '好大'], ['taunt_3', '大概這麼大吧']];
+const PK_STICKER_LABELS = [['taunt_1', '超大貓'], ['taunt_2', '好大'], ['taunt_3', '大概這麼大吧'], ['taunt_4', '你輸定了'], ['taunt_5', '算我倒楣'], ['taunt_6', '嘿嘿']];
 
 function StickerBar({ onSend, busy }) {
   return (
     <div>
       <div className="text-[10px] text-field-chalk/35 mb-1 text-center">嘲諷貼圖（2 秒內不能連點）</div>
-      <div className="flex justify-center gap-2">
+      <div className="flex flex-wrap justify-center gap-2">
         {PK_STICKER_LABELS.map(([key, label]) => (
           <button key={key} onClick={() => onSend(key)} disabled={busy}
             className="w-12 h-12 rounded-lg border border-field-chalk/15 bg-black/30 hover:border-field-floodlight overflow-hidden" title={label}>
@@ -197,12 +197,11 @@ export default function Poker() {
   const [raiseAmt, setRaiseAmt] = useState(1);
   const [showFlip, setShowFlip] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
-  const [sticker, setSticker] = useState(null); // 對手貼圖顯示
+  const [sticker, setSticker] = useState(null); // 貼圖顯示（雙方畫面）
   const [showPanel, setShowPanel] = useState(false); // 手機版牌型面板收展
   const [goldSide, setGoldSide] = useState(null); // 開牌後亮金邊的一方 'me'|'opp'
   const pollRef = useRef(null);
   const lastStickerSeq = useRef(0);
-  const showdownSeq = useRef(0);
   const lastSeq = useRef(0);
   const eggRef = useRef(Math.random() < 0.4); // 本裝置此局的紅心A彩蛋旗標
 
@@ -247,7 +246,7 @@ export default function Poker() {
     setShowGameOver(false);
   }, [view?.phase, view?.series?.gameNo]);
 
-  // 對手貼圖：顯示 2 秒
+  // 貼圖：顯示 2 秒（雙方畫面都會出現）
   useEffect(() => {
     const s = view?.lastSticker;
     if (s && s.seq > lastStickerSeq.current) {
@@ -258,24 +257,40 @@ export default function Poker() {
     }
   }, [view?.lastSticker?.seq]);
 
-  // 開牌決勝：先翻牌 → 1 秒後勝方亮金邊 → 再自動推進下一回合
-  useEffect(() => {
-    const rs = view?.round_state;
-    if (rs?.showdownHold && view.seq > showdownSeq.current) {
-      showdownSeq.current = view.seq;
-      setGoldSide(null);
-      // 1 秒後亮金邊（勝方），平手不亮
-      const t1 = setTimeout(() => {
-        if (rs.roundWinner) setGoldSide(rs.iWonRound ? 'me' : 'opp');
-      }, 1000);
-      // 動畫看完（約 2.4 秒）自動送出推進；雙方都送才會進下一回合
-      const t2 = setTimeout(() => {
-        setGoldSide(null);
-        act('pk_next_round');
-      }, 2400);
-      return () => { clearTimeout(t1); clearTimeout(t2); };
+  // 送出「推進下一回合」。
+  // 刻意不走 act()：act() 開頭有 `if (busy) return`，玩家在開牌後點貼圖時剛好會把
+  // busy 佔住，一次性的自動推進就這樣被靜靜丟掉、且永不重送 → 雙方一起卡在開牌畫面。
+  // 這裡不檢查也不佔用 busy，失敗就交給下面的重試迴圈；不 setView，
+  // 讓 1.6 秒的輪詢去更新畫面，避免回應亂序蓋掉較新的狀態。
+  const sendNextRound = useCallback(async () => {
+    if (!session) return;
+    try {
+      await api('/api/room/action', { ...session, action: 'pk_next_round' });
+    } catch {
+      /* 忽略：由重試迴圈再送一次（後端此動作為 idempotent） */
     }
-  }, [view?.seq, view?.round_state?.showdownHold]);
+  }, [session]);
+
+  // 開牌決勝：先翻牌 → 1 秒後勝方亮金邊 → 動畫看完自動推進下一回合。
+  // 依賴只放 showdownHold 這個布林值（不放 seq）：進入開牌時執行一次、離開時清乾淨，
+  // 中途任何 seq 變動（例如有人送貼圖）都不會把計時器清掉又重排。
+  // 推進採「持續重試」直到真的離開開牌狀態，單次請求掉了也能自己復原。
+  useEffect(() => {
+    if (!view?.round_state?.showdownHold) { setGoldSide(null); return; }
+    const rs = view.round_state;
+    setGoldSide(null);
+    const t1 = setTimeout(() => {
+      if (rs.roundWinner) setGoldSide(rs.iWonRound ? 'me' : 'opp');
+    }, 1000);
+    let retry = null;
+    const t2 = setTimeout(() => {
+      setGoldSide(null);
+      sendNextRound();
+      retry = setInterval(sendNextRound, 1500);
+    }, 2400);
+    return () => { clearTimeout(t1); clearTimeout(t2); if (retry) clearInterval(retry); };
+  }, [view?.round_state?.showdownHold, sendNextRound]);
+
 
   function enter(code, token, v) { ss.save(code, token); setSession({ code, token }); setView(v); setLobbyErr(''); }
   function leave() { ss.clear(); setSession(null); setView(null); }
@@ -452,9 +467,9 @@ export default function Poker() {
       </div>
       </div>
 
-      {/* 對手貼圖顯示（2 秒） */}
-      {sticker && sticker.role !== v.role && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60]" style={{ animation: 'stickerPop 2s ease-out both' }}>
+      {/* 貼圖顯示（2 秒，雙方畫面都會出現） */}
+      {sticker && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] pointer-events-none" style={{ animation: 'stickerPop 2s ease-out both' }}>
           <img src={`/poker/stickers/${sticker.name}.png`} alt="" className="w-28 h-28 object-contain drop-shadow-2xl" />
         </div>
       )}
@@ -518,7 +533,7 @@ function BetControls({ rs, busy, raiseAmt, setRaiseAmt, onAct, chips }) {
   return (
     <div className="space-y-2">
       <div className="text-center text-[11px] text-field-chalk/45">
-        {rs.stage === 'bet1' ? '第一次下注（注額上限 10）' : '第二次下注（注額上限 15）'}
+        {rs.stage === 'bet1' ? `第一次下注（注額上限 ${rs.betCaps.bet1}）` : `第二次下注（注額上限 ${rs.betCaps.bet2}）`}
         {curLevel > 0 && <span className="text-field-chalk/60">　目前注額 {curLevel}</span>}
         {toCall > 0 && <span className="text-field-floodlight">　需跟注 {toCall}</span>}
       </div>

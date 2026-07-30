@@ -314,7 +314,7 @@ export default function Ecard() {
 
       {/* 貼圖顯示（雙方都顯示，放大兩倍）*/}
       {sticker && (
-        <div className={`fixed z-[60] ${sticker.role === v.role ? 'bottom-24 right-6' : 'bottom-24 left-6'}`} style={{ animation: 'stickerPop 3s ease-out both' }}>
+        <div className={`fixed z-[60] pointer-events-none ${sticker.role === v.role ? 'bottom-24 right-6' : 'bottom-24 left-6'}`} style={{ animation: 'stickerPop 3s ease-out both' }}>
           <img src={`/ecard/sticker_${sticker.name}.png`} alt="" className="w-56 h-56 object-contain drop-shadow-2xl" />
           <div className="text-center text-[11px] text-field-chalk/60 mt-1">{sticker.role === v.role ? '你' : '對手'}</div>
         </div>

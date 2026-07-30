@@ -161,6 +161,13 @@ body {
   80%{opacity:1;}
   100%{opacity:0;}
 }
+/* 常駐對話框用的淡入（最後一格必須是 opacity:1）。
+   注意：memePulse 最後一格是 opacity:0，搭配 fill-mode `both` 會讓元素
+   在動畫結束後變透明卻仍留在畫面上吃掉點擊——需要互動的視窗一律用這個。 */
+@keyframes overlayIn {
+  0%{opacity:0;transform:scale(0.96);}
+  100%{opacity:1;transform:scale(1);}
+}
 @media (prefers-reduced-motion: reduce){
   @keyframes pkFlip{0%,100%{transform:none;filter:none;}}
   @keyframes ecFlip{0%,100%{transform:none;filter:none;}}
