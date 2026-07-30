@@ -7,7 +7,7 @@ import SeriesBar, { MatchPointMeme } from './SeriesBar';
 /* ------------------------------------------------------------------
  * E 卡．雙人心理對戰前端
  * 角色圖：/ecard/{emperor,slave,citizen,back}.png
- * 貼圖：/ecard/sticker_{name}.png（顯示 3 秒，每回合限 3 次）
+ * 貼圖：/ecard/sticker_{name}.png（顯示 3 秒，無次數限制、雙方可同時按、可連發）
  * 牌桌可見雙方手牌背與換序；翻牌慢後快。
  * ------------------------------------------------------------------ */
 
@@ -31,6 +31,7 @@ const CARD_IMG = { emperor: '/ecard/emperor.png', slave: '/ecard/slave.png', cit
 const STICKERS = [
   ['taunt', '挑釁'], ['eat', '吃掉'], ['serious', '認真'], ['confident', '自信'], ['dog', '狗懷疑'],
   ['cat', '貓問號'], ['emperor_face', '皇帝'], ['slave_face', '奴隸'], ['honest', '誠實'],
+  ['beggar', '乞丐'], ['lose', '輸了'], ['angry', '生氣'],
 ];
 
 function Card({ role, faceDown, flip, small, dim }) {
@@ -114,11 +115,12 @@ export default function Ecard() {
   const [stakeVal, setStakeVal] = useState(1);
   const [flip, setFlip] = useState(false);
   const [goldSide, setGoldSide] = useState(null); // 分勝負後亮金邊的一方 'me'|'opp'
-  const [sticker, setSticker] = useState(null); // { role, name }
+  const [stickers, setStickers] = useState({ a: null, b: null }); // 雙方各自獨立顯示
   const [showGameOver, setShowGameOver] = useState(false);
   const pollRef = useRef(null);
   const lastTrickSeq = useRef(0);
-  const lastStickerSeq = useRef(0);
+  const stickerSeqRef = useRef({ a: 0, b: 0 });
+  const stickerTimers = useRef({ a: null, b: null });
 
   useEffect(() => { const s = ss.load(); if (s?.code && s?.token) setSession(s); }, []);
 
@@ -156,16 +158,30 @@ export default function Ecard() {
     if (view?.phase !== 'roundEnd') setGoldSide(null);
   }, [view?.phase]);
 
-  // 對手貼圖：顯示 3 秒
+  // 貼圖：雙方各自獨立顯示 3 秒，可同時出現、也可以連發（連發會重新計時）。
   useEffect(() => {
-    const s = view?.lastSticker;
-    if (s && s.seq > lastStickerSeq.current) {
-      lastStickerSeq.current = s.seq;
-      setSticker(s);
-      const t = setTimeout(() => setSticker(null), 3000);
-      return () => clearTimeout(t);
+    const incoming = view?.stickers;
+    if (!incoming) return;
+    for (const seat of ['a', 'b']) {
+      const s = incoming[seat];
+      if (!s) continue;
+      // 用 !== 而不是 >：每一場 startGame() 會重建 ec，seq 從 0 重新算。
+      // 若用 >，前端還記著上一場的高水位，新一場的 seq 永遠追不上 → 貼圖再也不顯示
+      // （這正是「BO3 第二場不能按貼圖」的原因）。
+      if (s.seq === stickerSeqRef.current[seat]) continue;
+      stickerSeqRef.current[seat] = s.seq;
+      setStickers((prev) => ({ ...prev, [seat]: s }));
+      clearTimeout(stickerTimers.current[seat]);
+      stickerTimers.current[seat] = setTimeout(
+        () => setStickers((prev) => ({ ...prev, [seat]: null })), 3000);
     }
-  }, [view?.lastSticker?.seq]);
+  }, [view?.stickers?.a?.seq, view?.stickers?.b?.seq]);
+
+  // 卸載時清掉貼圖計時器
+  useEffect(() => () => {
+    clearTimeout(stickerTimers.current.a);
+    clearTimeout(stickerTimers.current.b);
+  }, []);
 
   // 一場結束時，先讓最後一輪結果顯示，延遲 1.4 秒再跳結算框
   useEffect(() => {
@@ -288,7 +304,7 @@ export default function Ecard() {
 
         {/* 貼圖列 */}
         <div className="mt-4">
-          <div className="text-[10px] text-field-chalk/35 mb-1 text-center">貼圖（每回合限 3 次）</div>
+          <div className="text-[10px] text-field-chalk/35 mb-1 text-center">貼圖</div>
           <div className="flex flex-wrap justify-center gap-1.5">
             {STICKERS.map(([key, label]) => (
               <button key={key} onClick={() => act('ec_sticker', { name: key })}
@@ -313,12 +329,20 @@ export default function Ecard() {
       </div>
 
       {/* 貼圖顯示（雙方都顯示，放大兩倍）*/}
-      {sticker && (
-        <div className={`fixed z-[60] pointer-events-none ${sticker.role === v.role ? 'bottom-24 right-6' : 'bottom-24 left-6'}`} style={{ animation: 'stickerPop 3s ease-out both' }}>
-          <img src={`/ecard/sticker_${sticker.name}.png`} alt="" className="w-56 h-56 object-contain drop-shadow-2xl" />
-          <div className="text-center text-[11px] text-field-chalk/60 mt-1">{sticker.role === v.role ? '你' : '對手'}</div>
-        </div>
-      )}
+      {['a', 'b'].map((seat) => {
+        const s = stickers[seat];
+        if (!s) return null;
+        const mine = seat === v.role;
+        // key 帶上 seq：連發同一張時強制重新掛載，動畫才會重播
+        return (
+          <div key={`${seat}-${s.seq}`}
+            className={`fixed bottom-24 z-[60] pointer-events-none ${mine ? 'right-6' : 'left-6'}`}
+            style={{ animation: 'stickerPop 3s ease-out both' }}>
+            <img src={`/ecard/sticker_${s.name}.png`} alt="" className="w-56 h-56 object-contain drop-shadow-2xl" />
+            <div className="text-center text-[11px] text-field-chalk/60 mt-1">{mine ? '你' : '對手'}</div>
+          </div>
+        );
+      })}
 
       {v.series?.matchPoint && <MatchPointMeme />}
 

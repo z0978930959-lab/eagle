@@ -197,11 +197,12 @@ export default function Poker() {
   const [raiseAmt, setRaiseAmt] = useState(1);
   const [showFlip, setShowFlip] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
-  const [sticker, setSticker] = useState(null); // 貼圖顯示（雙方畫面）
+  const [stickers, setStickers] = useState({ a: null, b: null }); // 雙方各自獨立顯示
   const [showPanel, setShowPanel] = useState(false); // 手機版牌型面板收展
   const [goldSide, setGoldSide] = useState(null); // 開牌後亮金邊的一方 'me'|'opp'
   const pollRef = useRef(null);
-  const lastStickerSeq = useRef(0);
+  const stickerSeqRef = useRef({ a: 0, b: 0 });
+  const stickerTimers = useRef({ a: null, b: null });
   const lastSeq = useRef(0);
   const eggRef = useRef(Math.random() < 0.4); // 本裝置此局的紅心A彩蛋旗標
 
@@ -246,16 +247,29 @@ export default function Poker() {
     setShowGameOver(false);
   }, [view?.phase, view?.series?.gameNo]);
 
-  // 貼圖：顯示 2 秒（雙方畫面都會出現）
+  // 貼圖：雙方各自獨立顯示 2 秒，可同時出現、也可以連發（連發會重新計時）。
   useEffect(() => {
-    const s = view?.lastSticker;
-    if (s && s.seq > lastStickerSeq.current) {
-      lastStickerSeq.current = s.seq;
-      setSticker(s);
-      const t = setTimeout(() => setSticker(null), 2000);
-      return () => clearTimeout(t);
+    const incoming = view?.stickers;
+    if (!incoming) return;
+    for (const seat of ['a', 'b']) {
+      const s = incoming[seat];
+      if (!s) continue;
+      // 用 !== 而不是 >：系列賽下一場會重建 pk、seq 從 0 重新算，
+      // 用 > 會因為前端還記著上一場的高水位而永遠不再顯示。
+      if (s.seq === stickerSeqRef.current[seat]) continue;
+      stickerSeqRef.current[seat] = s.seq;
+      setStickers((prev) => ({ ...prev, [seat]: s }));
+      clearTimeout(stickerTimers.current[seat]);
+      stickerTimers.current[seat] = setTimeout(
+        () => setStickers((prev) => ({ ...prev, [seat]: null })), 2000);
     }
-  }, [view?.lastSticker?.seq]);
+  }, [view?.stickers?.a?.seq, view?.stickers?.b?.seq]);
+
+  // 卸載時清掉貼圖計時器
+  useEffect(() => () => {
+    clearTimeout(stickerTimers.current.a);
+    clearTimeout(stickerTimers.current.b);
+  }, []);
 
   // 送出「推進下一回合」。
   // 刻意不走 act()：act() 開頭有 `if (busy) return`，玩家在開牌後點貼圖時剛好會把
@@ -467,12 +481,21 @@ export default function Poker() {
       </div>
       </div>
 
-      {/* 貼圖顯示（2 秒，雙方畫面都會出現） */}
-      {sticker && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[60] pointer-events-none" style={{ animation: 'stickerPop 2s ease-out both' }}>
-          <img src={`/poker/stickers/${sticker.name}.png`} alt="" className="w-28 h-28 object-contain drop-shadow-2xl" />
-        </div>
-      )}
+      {/* 貼圖顯示（2 秒，雙方畫面都會出現；雙方同時按會左右並列） */}
+      {['a', 'b'].map((seat) => {
+        const s = stickers[seat];
+        if (!s) return null;
+        const mine = seat === v.role;
+        // key 帶上 seq：連發同一張時強制重新掛載，動畫才會重播
+        return (
+          <div key={`${seat}-${s.seq}`}
+            className={`fixed bottom-28 z-[60] pointer-events-none ${mine ? 'right-6' : 'left-6'}`}
+            style={{ animation: 'stickerPop 2s ease-out both' }}>
+            <img src={`/poker/stickers/${s.name}.png`} alt="" className="w-28 h-28 object-contain drop-shadow-2xl" />
+            <div className="text-center text-[11px] text-field-chalk/60 mt-1">{mine ? '你' : '對手'}</div>
+          </div>
+        );
+      })}
       {/* 生死局梗圖 */}
       {v.series?.matchPoint && <MatchPointMeme />}
 

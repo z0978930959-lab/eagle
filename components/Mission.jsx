@@ -157,11 +157,12 @@ export default function Mission() {
   const [msg, setMsg] = useState('');
   const [lobbyErr, setLobbyErr] = useState('');
   const [flipIdx, setFlipIdx] = useState(null);
-  const [sticker, setSticker] = useState(null);
+  const [stickers, setStickers] = useState({ a: null, b: null }); // 雙方各自獨立顯示
   const [showFail, setShowFail] = useState(false);
   const pollRef = useRef(null);
   const lastRevealSeq = useRef(0);
-  const lastStickerSeq = useRef(0);
+  const stickerSeqRef = useRef({ a: 0, b: 0 });
+  const stickerTimers = useRef({ a: null, b: null });
 
   useEffect(() => { const s = ss.load(); if (s?.code && s?.token) setSession(s); }, []);
 
@@ -198,16 +199,28 @@ export default function Mission() {
     if (view?.phase !== 'over') setShowFail(false);
   }, [view?.phase, view?.result]);
 
-  // 貼圖顯示（2 秒）
+  // 貼圖：雙方各自獨立顯示 2 秒，可同時出現、也可以連發（連發會重新計時）。
   useEffect(() => {
-    const s = view?.lastSticker;
-    if (s && s.seq > lastStickerSeq.current) {
-      lastStickerSeq.current = s.seq;
-      setSticker(s);
-      const t = setTimeout(() => setSticker(null), 2000);
-      return () => clearTimeout(t);
+    const incoming = view?.stickers;
+    if (!incoming) return;
+    for (const seat of ['a', 'b']) {
+      const s = incoming[seat];
+      if (!s) continue;
+      // 用 !== 而不是 >：seq 若因為重開新局而歸零，用 > 會永遠追不上而不再顯示。
+      if (s.seq === stickerSeqRef.current[seat]) continue;
+      stickerSeqRef.current[seat] = s.seq;
+      setStickers((prev) => ({ ...prev, [seat]: s }));
+      clearTimeout(stickerTimers.current[seat]);
+      stickerTimers.current[seat] = setTimeout(
+        () => setStickers((prev) => ({ ...prev, [seat]: null })), 2000);
     }
-  }, [view?.lastSticker?.seq]);
+  }, [view?.stickers?.a?.seq, view?.stickers?.b?.seq]);
+
+  // 卸載時清掉貼圖計時器
+  useEffect(() => () => {
+    clearTimeout(stickerTimers.current.a);
+    clearTimeout(stickerTimers.current.b);
+  }, []);
 
   function enter(code, token, v) { ss.save(code, token); setSession({ code, token }); setView(v); setLobbyErr(''); }
   function leave() { ss.clear(); setSession(null); setView(null); }
@@ -382,11 +395,20 @@ export default function Mission() {
       </div>
 
       {/* 貼圖顯示 */}
-      {sticker && (
-        <div className={`fixed bottom-24 z-[60] pointer-events-none ${sticker.seat === v.seat ? 'right-6' : 'left-6'}`} style={{ animation: 'stickerPop 2s ease-out both' }}>
-          <img src={`/mission/stickers/${sticker.name}.png`} alt="" className="w-28 h-28 object-contain drop-shadow-2xl" />
-        </div>
-      )}
+      {['a', 'b'].map((seat) => {
+        const s = stickers[seat];
+        if (!s) return null;
+        // key 帶上 seq：連發同一張時強制重新掛載，動畫才會重播
+        return (
+          <div key={`${seat}-${s.seq}`}
+            className={`fixed bottom-24 z-[60] pointer-events-none ${seat === v.seat ? 'right-6' : 'left-6'}`}
+            style={{ animation: 'stickerPop 2s ease-out both' }}>
+            {/* 尺寸放大兩倍：w-28/h-28 → w-56/h-56 */}
+            <img src={`/mission/stickers/${s.name}.png`} alt="" className="w-56 h-56 object-contain drop-shadow-2xl" />
+            <div className="text-center text-[11px] text-field-chalk/60 mt-1">{seat === v.seat ? '你' : '對手'}</div>
+          </div>
+        );
+      })}
 
       {/* 勝利／逾時終局 */}
       {isOver && v.result !== 'bomb' && (
