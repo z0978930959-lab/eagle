@@ -7,7 +7,7 @@ import Splendor from './Splendor';
 import Mission from './Mission';
 import Poker from './Poker';
 import Ecard from './Ecard';
-import Tournament from './Tournament';
+import DrawGuess from './DrawGuess';
 
 /* 遊戲入口：選擇棒球對戰、賓果對決或璀璨寶石。
  * 進入遊戲後左上角有「⌂」可回到選單（對局進度存在 sessionStorage，
@@ -51,10 +51,10 @@ const MODES = [
     desc: '皇帝奴隸市民三者相剋——心理博弈，賭一把翻盤',
   },
   {
-    key: 'tournament',
-    icon: '🏆',
-    title: '綜合比賽',
-    desc: '賓果＋E卡＋17撲克隨機三場——先贏兩場者奪冠',
+    key: 'drawguess',
+    icon: '🎨',
+    title: '你畫我猜',
+    desc: '一人作畫一人猜——共用總分，輪流畫猜，可設 5/10/15 回合',
   },
 ];
 
@@ -69,7 +69,7 @@ export default function Home() {
       mission: <Mission />,
       poker: <Poker />,
       ecard: <Ecard />,
-      tournament: <Tournament />,
+      drawguess: <DrawGuess />,
     }[mode];
     return (
       <div className="relative">
