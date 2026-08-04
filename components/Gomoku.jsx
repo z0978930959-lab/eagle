@@ -205,7 +205,17 @@ function Board({ v, onPlace, disabled }) {
       </svg>
 
       {/* 落子點 */}
-      <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${SIZE}, minmax(0,1fr))` }}>
+      {/* 落子點：15×15 等分格，每格中心正好落在上面 SVG 的線交叉點上。
+          ★ 行高一定要一起指定 15 等分——只給 gridTemplateColumns 的話，
+            grid-auto-rows 預設是 auto，空格高度會塌成 0，整盤棋子會被擠到
+            上緣，看起來既不在格子裡也不在交叉點上。 */}
+      <div
+        className="absolute inset-0 grid"
+        style={{
+          gridTemplateColumns: `repeat(${SIZE}, minmax(0,1fr))`,
+          gridTemplateRows: `repeat(${SIZE}, minmax(0,1fr))`,
+        }}
+      >
         {Array.from({ length: SIZE * SIZE }).map((_, i) => {
           const x = i % SIZE;
           const y = Math.floor(i / SIZE);
@@ -233,8 +243,13 @@ function Board({ v, onPlace, disabled }) {
                   {isLast && <span className="absolute inset-0 m-auto w-[22%] h-[22%] rounded-full bg-field-floodlight/90 shadow" />}
                 </div>
               )}
+              {/* 禁手點的 ✕：用兩根旋轉的橫槓畫，會跟著格子大小縮放。
+                  用文字的 ✕ 在手機上會小到看不見（字級沒辦法跟著格寬走）。 */}
               {cell === 0 && isForbidden && (
-                <span className="text-red-500 font-black leading-none select-none" style={{ fontSize: 'min(2.2vw,14px)' }}>✕</span>
+                <span className="relative block w-[52%] h-[52%] pointer-events-none">
+                  <span className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 rotate-45 rounded-full bg-red-500 shadow-[0_0_3px_rgba(0,0,0,0.5)]" />
+                  <span className="absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 -rotate-45 rounded-full bg-red-500 shadow-[0_0_3px_rgba(0,0,0,0.5)]" />
+                </span>
               )}
             </button>
           );
