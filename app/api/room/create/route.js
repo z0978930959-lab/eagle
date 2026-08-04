@@ -35,7 +35,7 @@ export async function POST(req) {
   } catch {
     return NextResponse.json({ error: 'BAD_INPUT' }, { status: 400 });
   }
-  const { innings, teamId, extraMode, mode, reveal, cor, players, seriesMode, difficulty, rounds } = body || {};
+  const { innings, teamId, extraMode, mode, reveal, cor, players, seriesMode, difficulty, rounds, boardMode } = body || {};
 
   const isBingo = mode === 'bingo';
   const game = gameByMode(mode); // 註冊表中的連線遊戲（splendor/mission/poker/ecard）
@@ -52,7 +52,7 @@ export async function POST(req) {
     let room;
     try {
       if (game) {
-        room = game.create({ code, players: players === 3 ? 3 : 2, seriesMode: validSeries, difficulty, rounds });
+        room = game.create({ code, players: players === 3 ? 3 : 2, seriesMode: validSeries, difficulty, rounds, boardMode });
       } else if (isBingo) {
         room = createBingoRoom({ code, reveal: !!reveal });
       } else {

@@ -8,6 +8,7 @@ import Mission from './Mission';
 import Poker from './Poker';
 import Ecard from './Ecard';
 import DrawGuess from './DrawGuess';
+import Gomoku from './Gomoku';
 
 /* 遊戲入口：選擇棒球對戰、賓果對決或璀璨寶石。
  * 進入遊戲後左上角有「⌂」可回到選單（對局進度存在 sessionStorage，
@@ -51,6 +52,12 @@ const MODES = [
     desc: '皇帝奴隸市民三者相剋——心理博弈，賭一把翻盤',
   },
   {
+    key: 'gomoku',
+    icon: '⚫',
+    title: '五子棋',
+    desc: '15×15 黑白對弈——唯一禁手：先手不可下雙活三，另有友善提示模式',
+  },
+  {
     key: 'drawguess',
     icon: '🎨',
     title: '你畫我猜',
@@ -69,6 +76,7 @@ export default function Home() {
       mission: <Mission />,
       poker: <Poker />,
       ecard: <Ecard />,
+      gomoku: <Gomoku />,
       drawguess: <DrawGuess />,
     }[mode];
     return (

@@ -8,7 +8,7 @@ import { clientIp } from '../../../../lib/clientIp';
 
 export const dynamic = 'force-dynamic';
 
-const MODE_LABEL = { bingo: '賓果', baseball: '棒球', splendor: '璀璨寶石', mission: '密語連線', poker: '17 撲克', ecard: 'E 卡', drawguess: '你畫我猜' };
+const MODE_LABEL = { bingo: '賓果', baseball: '棒球', splendor: '璀璨寶石', mission: '密語連線', poker: '17 撲克', ecard: 'E 卡', drawguess: '你畫我猜', gomoku: '五子棋' };
 
 export async function POST(req) {
   if (!storeReady()) {
