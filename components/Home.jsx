@@ -42,7 +42,7 @@ const MODES = [
     key: 'poker',
     icon: '🃏',
     title: '17 張撲克',
-    desc: 'JQKA＋鬼牌——下注、換牌、比牌型，六回合定勝負',
+    desc: 'JQKA＋鬼牌——下注、換牌、比牌型，八回合定勝負',
   },
   {
     key: 'ecard',

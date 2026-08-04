@@ -8,6 +8,8 @@ import SeriesBar, { MatchPointMeme } from './SeriesBar';
  * 17 張撲克．雙人牌桌前端
  * 牌面圖：/poker/{d,c,h,s}_{J,Q,K,A}.png、joker.png、back.png
  *   紅心 A 有 40% 機率顯示特殊臉 h_A_special.png（彩蛋）
+ * 貼圖：/poker/stickers/taunt_1..10.png，彈出顯示 w-56（原本 w-28 的兩倍）
+ * 破限加注：每人每場一次，可無視階段上限把注加到 50
  * ------------------------------------------------------------------ */
 
 async function api(path, body) {
@@ -80,7 +82,7 @@ function Lobby({ onEnter, initialError }) {
     <div className="min-h-screen bg-gradient-to-b from-[#1c1712] via-[#14100c] to-[#0a0806]">
       <div className="max-w-md mx-auto px-6 py-16 text-center">
         <div className="font-display text-4xl font-black text-field-chalk mb-1">17 張撲克</div>
-        <div className="text-field-chalk/45 text-xs tracking-[0.3em] mb-8">JQKA＋鬼牌．六回合定勝負</div>
+        <div className="text-field-chalk/45 text-xs tracking-[0.3em] mb-8">JQKA＋鬼牌．八回合定勝負</div>
 
         <div className="flex rounded-xl overflow-hidden border border-field-chalk/20 mb-5">
           {[['create', '建立房間'], ['join', '加入房間']].map(([k, label]) => (
@@ -167,12 +169,17 @@ function HandRankPanel({ current }) {
 
 /* ---------------- 貼圖列 ---------------- */
 
-const PK_STICKER_LABELS = [['taunt_1', '超大貓'], ['taunt_2', '好大'], ['taunt_3', '大概這麼大吧'], ['taunt_4', '你輸定了'], ['taunt_5', '算我倒楣'], ['taunt_6', '嘿嘿']];
+const PK_STICKER_LABELS = [
+  ['taunt_1', '超大貓'], ['taunt_2', '好大'], ['taunt_3', '大概這麼大吧'],
+  ['taunt_4', '你輸定了'], ['taunt_5', '算我倒楣'], ['taunt_6', '嘿嘿'],
+  ['taunt_7', '你痴，我可不白痴'], ['taunt_8', '瑞士銀行本票'],
+  ['taunt_9', '好，我跟你 Show Hand'], ['taunt_10', '搓牌'],
+];
 
 function StickerBar({ onSend, busy }) {
   return (
     <div>
-      <div className="text-[10px] text-field-chalk/35 mb-1 text-center">嘲諷貼圖（2 秒內不能連點）</div>
+      <div className="text-[10px] text-field-chalk/35 mb-1 text-center">嘲諷貼圖</div>
       <div className="flex flex-wrap justify-center gap-2">
         {PK_STICKER_LABELS.map(([key, label]) => (
           <button key={key} onClick={() => onSend(key)} disabled={busy}
@@ -374,6 +381,18 @@ export default function Poker() {
           </div>
         </div>
 
+        {/* 破限加注剩餘機會（每人每場一次，上限 50）*/}
+        {rs?.superLeft && (
+          <div className="grid grid-cols-2 gap-2 -mt-1 mb-3 text-[10px] text-center">
+            <div className={rs.superLeft.me ? 'text-field-floodlight/80' : 'text-field-chalk/25 line-through'}>
+              💥 你的破限加注（上限 {rs.superMax}）{rs.superLeft.me ? '　可用' : '　已用'}
+            </div>
+            <div className={rs.superLeft.opp ? 'text-field-chalk/60' : 'text-field-chalk/25 line-through'}>
+              💥 對手破限加注{rs.superLeft.opp ? '　未用' : '　已用'}
+            </div>
+          </div>
+        )}
+
         {rs && (
           <>
             {/* 對手手牌（背面，開牌後翻正）*/}
@@ -491,7 +510,7 @@ export default function Poker() {
           <div key={`${seat}-${s.seq}`}
             className={`fixed bottom-28 z-[60] pointer-events-none ${mine ? 'right-6' : 'left-6'}`}
             style={{ animation: 'stickerPop 2s ease-out both' }}>
-            <img src={`/poker/stickers/${s.name}.png`} alt="" className="w-28 h-28 object-contain drop-shadow-2xl" />
+            <img src={`/poker/stickers/${s.name}.png`} alt="" className="w-56 h-56 object-contain drop-shadow-2xl" />
             <div className="text-center text-[11px] text-field-chalk/60 mt-1">{mine ? '你' : '對手'}</div>
           </div>
         );
@@ -543,14 +562,27 @@ export default function Poker() {
 /* ---------------- 下注控制 ---------------- */
 
 function BetControls({ rs, busy, raiseAmt, setRaiseAmt, onAct, chips }) {
+  // 破限模式：本次加注要不要動用「一場一次」的破限機會。
+  // BetControls 只在輪到自己時掛載，換手時會自動卸載 → 這個開關不需要手動重置。
+  const [superMode, setSuperMode] = useState(false);
+
   const toCall = rs.toCall;
   const cap = rs.stage === 'bet1' ? rs.betCaps.bet1 : rs.betCaps.bet2;
+  const superMax = rs.superMax ?? 50;
+  const superLeft = !!rs.superLeft?.me;
   // 當前注額 = 雙方本回合已投入的較大者
   const curLevel = Math.max(rs.bets.me, rs.bets.opp);
+
+  // 破限值得開的條件：機會還在，而且籌碼真的加得過一般上限（否則按了也沒意義）
+  const superUsable = superLeft && Math.min(superMax, rs.bets.me + chips) > cap;
+  const useSuper = superMode && superUsable;
+
   // 加注目標範圍：(當前注額, 上限]，且補差額不超過自己剩餘籌碼
-  const maxTarget = Math.min(cap, rs.bets.me + chips);
-  const canRaise = maxTarget > curLevel;
-  const minTarget = curLevel + 1;
+  const effCap = useSuper ? superMax : cap;
+  const maxTarget = Math.min(effCap, rs.bets.me + chips);
+  // 破限模式下最低要加到超過一般上限，不然等於白白燒掉那一次機會
+  const minTarget = useSuper ? Math.max(curLevel + 1, cap + 1) : curLevel + 1;
+  const canRaise = maxTarget >= minTarget;
   const target = Math.max(minTarget, Math.min(raiseAmt, maxTarget));
 
   return (
@@ -573,14 +605,27 @@ function BetControls({ rs, busy, raiseAmt, setRaiseAmt, onAct, chips }) {
             className="flex-1 py-2 rounded-lg border border-field-chalk/25 text-field-chalk/70 text-sm">過牌</button>
         )}
       </div>
+      {/* 破限加注開關：一場一次，打開後加注上限直接放寬到 superMax */}
+      {superUsable && (
+        <button onClick={() => setSuperMode((m) => !m)} disabled={busy}
+          className={`w-full py-2 rounded-lg border text-[12px] tracking-wider ${
+            useSuper
+              ? 'border-red-400/70 bg-red-500/15 text-red-200'
+              : 'border-field-chalk/25 text-field-chalk/60'
+          }`}>
+          {useSuper
+            ? `💥 破限加注已開啟　上限 ${superMax}（送出後就用掉了）`
+            : `💥 破限加注（整場只有一次，上限 ${superMax}）`}
+        </button>
+      )}
       {canRaise && (
         <div className="flex items-center gap-2">
           <input type="range" min={minTarget} max={maxTarget} value={target}
             onChange={(e) => setRaiseAmt(Number(e.target.value))} className="flex-1 accent-[#f5cf6a]" />
-          <span className="font-mono text-sm text-field-floodlight w-10 text-center">加到{target}</span>
-          <button onClick={() => onAct('pk_bet', { move: toCall > 0 ? 'raise' : 'bet', amount: target })} disabled={busy}
-            className="px-4 py-2 rounded-lg border border-field-floodlight/60 text-field-floodlight text-sm">
-            {curLevel > 0 ? '加注' : '下注'}
+          <span className={`font-mono text-sm w-10 text-center ${useSuper ? 'text-red-300' : 'text-field-floodlight'}`}>加到{target}</span>
+          <button onClick={() => onAct('pk_bet', { move: toCall > 0 ? 'raise' : 'bet', amount: target, super: useSuper })} disabled={busy}
+            className={`px-4 py-2 rounded-lg border text-sm ${useSuper ? 'border-red-400/70 text-red-200' : 'border-field-floodlight/60 text-field-floodlight'}`}>
+            {useSuper ? 'Show Hand' : curLevel > 0 ? '加注' : '下注'}
           </button>
         </div>
       )}

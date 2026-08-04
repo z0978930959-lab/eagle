@@ -9,6 +9,7 @@ import SeriesBar, { MatchPointMeme } from './SeriesBar';
  * 角色圖：/ecard/{emperor,slave,citizen,back}.png
  * 貼圖：/ecard/sticker_{name}.png（顯示 3 秒，無次數限制、雙方可同時按、可連發）
  * 牌桌可見雙方手牌背與換序；翻牌慢後快。
+ * 平手（市民 vs 市民）同樣會攤牌停 2.2 秒，看完才自動續下一輪。
  * ------------------------------------------------------------------ */
 
 async function api(path, body) {
@@ -158,6 +159,32 @@ export default function Ecard() {
     if (view?.phase !== 'roundEnd') setGoldSide(null);
   }, [view?.phase]);
 
+  // 送出「平手看完，推進下一輪」。
+  // 刻意不走 act()：act() 開頭有 `if (busy) return`，玩家在翻牌時剛好點貼圖就會把
+  // busy 佔住，一次性的自動推進被靜靜丟掉 → 雙方一起卡在平手畫面。
+  // 這裡不佔用 busy，也不 setView（交給輪詢更新，避免回應亂序蓋掉較新狀態）。
+  const sendNextTrick = useCallback(async () => {
+    if (!session) return;
+    try {
+      await api('/api/room/action', { ...session, action: 'ec_next_trick' });
+    } catch {
+      /* 忽略：由重試迴圈再送一次（後端此動作為 idempotent） */
+    }
+  }, [session]);
+
+  // 平手翻牌：兩張牌攤開停 2.2 秒讓雙方看清楚，再自動推進下一輪。
+  // 依賴只放 tieHold 這個布林值（不放 seq）：進入時排一次計時器、離開時清乾淨，
+  // 中途任何 seq 變動（例如有人送貼圖）都不會把計時器清掉又重排。
+  useEffect(() => {
+    if (!view?.r?.tieHold) return;
+    let retry = null;
+    const t = setTimeout(() => {
+      sendNextTrick();
+      retry = setInterval(sendNextTrick, 1500);
+    }, 2200);
+    return () => { clearTimeout(t); if (retry) clearInterval(retry); };
+  }, [view?.r?.tieHold, sendNextTrick]);
+
   // 貼圖：雙方各自獨立顯示 3 秒，可同時出現、也可以連發（連發會重新計時）。
   useEffect(() => {
     const incoming = view?.stickers;
@@ -279,7 +306,9 @@ export default function Ecard() {
                 <div className="text-[11px] text-field-chalk/45 mb-2">
                   {v.phase === 'roundEnd'
                     ? (r.winnerSide === 'emperor' ? '皇帝方勝' : '奴隸方勝')
-                    : `第 ${r.trick + 1} 輪　·　${r.firstPlayer === v.role ? '你' : '對手'}先出`}
+                    : r.tieHold
+                      ? <span className="text-field-floodlight/90">第 {r.trick + 1} 輪　·　市民 vs 市民，平手——續下一輪</span>
+                      : `第 ${r.trick + 1} 輪　·　${r.firstPlayer === v.role ? '你' : '對手'}先出`}
                 </div>
                 <div className="flex justify-center items-center gap-8">
                   <div>
@@ -421,6 +450,7 @@ function EcardControls({ v, r, busy, stakeVal, setStakeVal, onAct, labels }) {
   }
 
   if (v.phase === 'play') {
+    if (r.tieHold) return <div className="text-center text-sm text-field-floodlight/80 py-3">平手，翻牌確認中…</div>;
     if (!r.myTurnToPlay) return <div className="text-center text-sm text-field-chalk/50 py-3">等待對手出牌…</div>;
     return (
       <div className="rounded-xl border border-field-chalk/15 bg-black/30 p-3">
