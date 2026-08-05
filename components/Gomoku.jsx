@@ -34,8 +34,72 @@ const ss = {
 
 const STAR_POINTS = [[3, 3], [11, 3], [3, 11], [11, 11], [7, 7]];
 const GM_STICKER_LABELS = [['taunt_1', '無言'], ['taunt_2', '傻眼貓咪']];
+const FORBIDDEN_LABEL = { double_three: '三三禁手', double_four: '四四禁手', overline: '長連禁手' };
 
 /* ---------------- 規則面板（棋盤旁的說明）---------------- */
+
+/* 規則示意圖：四張 7×5 的局部棋盤，中心點就是「這一手」。
+   紅圈 ✕＝黑方不能下（三種禁手各一例），綠圈 ✓＝合法（四三）。
+   全部用同一個中心點做對照，差別只在周圍多／少一顆子，比純文字好懂。 */
+const FIG_PANELS = [
+  { stones: [[2, 2], [4, 2], [3, 1], [3, 3]], ok: false, caption: '✕ 三三禁手（兩個活三）' },
+  { stones: [[1, 2], [2, 2], [4, 2], [3, 0], [3, 1], [3, 3]], ok: false, caption: '✕ 四四禁手（兩個四）' },
+  { stones: [[0, 2], [1, 2], [2, 2], [4, 2], [5, 2]], ok: false, caption: '✕ 長連禁手（六子以上）' },
+  { stones: [[1, 2], [2, 2], [4, 2], [3, 1], [3, 3]], ok: true, caption: '✓ 四三合法（一四一三）' },
+];
+
+function RuleFigure() {
+  const P = 14; // 格距
+  const COLS = 7;
+  const ROWS = 5;
+  const RECT_X = 48;
+  const RECT_W = 104;
+  const RECT_H = 76;
+  const PITCH = 100; // 每一格示意圖佔的垂直高度
+
+  return (
+    <svg viewBox={`0 0 200 ${FIG_PANELS.length * PITCH + 10}`} className="w-full" role="img"
+      aria-label="黑方三種禁手與合法四三的示意圖">
+      {FIG_PANELS.map((panel, i) => {
+        const ry = 10 + i * PITCH;
+        const ox = RECT_X + 10;
+        const oy = ry + 10;
+        const cx = ox + 3 * P; // 中心點就是這一手
+        const cy = oy + 2 * P;
+        const c = panel.ok ? '#84cc16' : '#ef4444';
+        return (
+          <g key={i}>
+            <rect x={RECT_X} y={ry} width={RECT_W} height={RECT_H} rx={6} fill="#c8985d" />
+            <g stroke="rgba(60,35,10,0.55)" strokeWidth="0.7">
+              {Array.from({ length: ROWS }).map((_, r) => (
+                <line key={`r${r}`} x1={ox} y1={oy + r * P} x2={ox + (COLS - 1) * P} y2={oy + r * P} />
+              ))}
+              {Array.from({ length: COLS }).map((_, k) => (
+                <line key={`c${k}`} x1={ox + k * P} y1={oy} x2={ox + k * P} y2={oy + (ROWS - 1) * P} />
+              ))}
+            </g>
+            {panel.stones.map(([gx, gy], k) => (
+              <circle key={k} cx={ox + gx * P} cy={oy + gy * P} r={5.2} fill="#23201c" stroke="rgba(0,0,0,0.5)" strokeWidth="0.5" />
+            ))}
+            {/* 記號底下先蓋一塊底色，不然格線會穿過去，紅 ✕ 看起來像米字 */}
+            <circle cx={cx} cy={cy} r={6.4} fill="#c8985d" />
+            <g fill="none" stroke={c} strokeWidth="1.4" strokeLinecap="round">
+              <circle cx={cx} cy={cy} r={6.4} />
+              {panel.ok ? (
+                <path d={`M${cx - 3} ${cy} L${cx - 0.8} ${cy + 2.3} L${cx + 3} ${cy - 2.6}`} />
+              ) : (
+                <path d={`M${cx - 3.2} ${cy - 3.2} L${cx + 3.2} ${cy + 3.2} M${cx + 3.2} ${cy - 3.2} L${cx - 3.2} ${cy + 3.2}`} />
+              )}
+            </g>
+            <text x="100" y={ry + RECT_H + 15} textAnchor="middle" fontSize="10.5" fill={c} fontWeight="bold">
+              {panel.caption}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
 
 function RulePanel({ boardMode }) {
   return (
@@ -47,21 +111,41 @@ function RulePanel({ boardMode }) {
         </div>
       </div>
 
-      <div className="rounded-lg border border-red-400/35 bg-red-500/[0.07] p-2.5">
-        <div className="text-[11px] font-bold text-red-300 mb-1">⛔ 唯一禁手：先手不可下雙活三</div>
-        <div className="text-[11px] leading-relaxed text-field-chalk/60">
-          黑方（先手）<span className="text-red-300">不得</span>下出一手同時形成兩個以上「活三」的著手。
-          這類點會直接被系統擋下，落子前就會在盤面上標成
-          <span className="text-red-400 font-bold mx-0.5">✕</span>。
-          白方（後手）沒有任何禁手限制。
+      <div className="rounded-lg border border-red-400/35 bg-red-500/[0.07] p-2.5 space-y-1.5">
+        <div className="text-[11px] font-bold text-red-300">⛔ 先手（黑）的三種禁手</div>
+        <div className="text-[11px] leading-relaxed text-field-chalk/60 space-y-1">
+          <div><span className="text-red-300 font-bold">三三禁手</span>　一手同時做出兩個以上的「活三」</div>
+          <div><span className="text-red-300 font-bold">四四禁手</span>　一手同時做出兩個以上的「四」（活四、沖四都算）</div>
+          <div><span className="text-red-300 font-bold">長連禁手</span>　連成六子以上</div>
         </div>
-        <div className="text-[10px] leading-relaxed text-field-chalk/40 mt-1.5">
-          例外：該手若本身就直接連成五子，五連優先，判勝不算禁手。
+        <div className="text-[11px] leading-relaxed text-field-chalk/60 pt-0.5">
+          判定看的是<span className="text-field-chalk/85">「這一手」同時做出幾個</span>，不是盤面上總共有幾個——
+          先前就存在的活三、四都不算在內。這些點會被系統直接擋下，輪到黑方時就先在盤面標成
+          <span className="text-red-400 font-bold mx-0.5">✕</span>（滑過去看得到是哪一種）。
+        </div>
+        <div className="text-[10px] leading-relaxed text-field-chalk/40 pt-0.5">
+          例外：該手若本身就連成<span className="text-field-chalk/60">正好五子</span>，五連優先，判勝不算禁手。
+          白方連六子則照樣算贏。
         </div>
       </div>
 
-      <div className="text-[10px] leading-relaxed text-field-chalk/40">
-        <span className="text-field-chalk/55">活三</span>＝再補一子就會變成兩端都能成五的「活四」。
+      {/* 示意圖就放在規則旁邊，紅圈不能下、綠圈可以下 */}
+      <div className="rounded-lg border border-field-chalk/12 bg-black/20 p-2">
+        <RuleFigure />
+      </div>
+
+      <div className="rounded-lg border border-field-chalk/12 p-2.5 space-y-1.5">
+        <div className="text-[11px] leading-relaxed text-field-chalk/60">
+          <span className="text-field-chalk/85">活三</span>＝再補一子就會變成兩端都能成五的「活四」。
+          <span className="text-field-chalk/85">四</span>＝再補一子就能成五。
+        </div>
+        <div className="text-[11px] leading-relaxed text-field-chalk/60">
+          <span className="text-lime-300/90">四三是合法的</span>——一手做出一個四加一個活三不受限制，
+          這是最主要的取勝手段。只有「三＋三」和「四＋四」才禁。
+        </div>
+        <div className="text-[11px] leading-relaxed text-field-chalk/60">
+          白方（後手）<span className="text-field-chalk/85">三種禁手一種都沒有</span>。
+        </div>
       </div>
 
       <div className={`rounded-lg border p-2.5 ${boardMode === 'friendly' ? 'border-field-floodlight/35 bg-field-floodlight/[0.06]' : 'border-field-chalk/12'}`}>
@@ -108,7 +192,7 @@ function Lobby({ onEnter, initialError }) {
     <div className="min-h-screen bg-gradient-to-b from-[#20180f] via-[#15100a] to-[#0a0705]">
       <div className="max-w-md mx-auto px-6 py-14 text-center">
         <div className="font-display text-4xl font-black text-field-chalk mb-1">五子棋</div>
-        <div className="text-field-chalk/45 text-xs tracking-[0.3em] mb-8">15×15．先手不可下雙活三</div>
+        <div className="text-field-chalk/45 text-xs tracking-[0.3em] mb-8">15×15．先手三大禁手</div>
 
         <div className="flex rounded-xl overflow-hidden border border-field-chalk/20 mb-5">
           {[['create', '建立房間'], ['join', '加入房間']].map(([k, label]) => (
@@ -181,7 +265,7 @@ function Board({ v, onPlace, disabled }) {
         if (!threat.has(k) || rank[t.kind] > rank[threat.get(k)]) threat.set(k, t.kind);
       }
     }
-    const forbidden = new Set((v.forbidden || []).map(([x, y]) => `${x},${y}`));
+    const forbidden = new Map((v.forbidden || []).map(([x, y, kind]) => [`${x},${y}`, kind]));
     const win = new Set((v.winLine || []).map(([x, y]) => `${x},${y}`));
     return { threat, forbidden, win };
   }, [v.threats, v.forbidden, v.winLine]);
@@ -223,13 +307,14 @@ function Board({ v, onPlace, disabled }) {
           const cell = v.board[i];
           const isLast = v.last && v.last.x === x && v.last.y === y;
           const kind = marks.threat.get(key);
-          const isForbidden = showForbidden && marks.forbidden.has(key);
+          const forbiddenKind = showForbidden ? marks.forbidden.get(key) : null;
+          const isForbidden = !!forbiddenKind;
           const isWin = marks.win.has(key);
 
           return (
             <button key={i} disabled={disabled || cell !== 0}
               onClick={() => onPlace(x, y)}
-              title={isForbidden ? '禁手：雙活三，不能下這裡' : `${x + 1},${y + 1}`}
+              title={isForbidden ? `${FORBIDDEN_LABEL[forbiddenKind]}：不能下這裡` : `${x + 1},${y + 1}`}
               className="relative flex items-center justify-center disabled:cursor-default">
               {cell !== 0 && (
                 <div className={`relative w-[88%] aspect-square rounded-full ${isWin ? 'pk-win-glow' : ''}`}>
@@ -240,7 +325,13 @@ function Board({ v, onPlace, disabled }) {
                       style={{ boxShadow: `0 0 0 2px ${kind === 'three_open' ? '#ef4444' : '#f87171'}, 0 0 7px 1px rgba(239,68,68,0.6)` }}
                     />
                   )}
-                  {isLast && <span className="absolute inset-0 m-auto w-[22%] h-[22%] rounded-full bg-field-floodlight/90 shadow" />}
+                  {/* 最新的一手：中央金點閃爍 ＋ 外圈擴散，對手一眼看得出剛下在哪 */}
+                  {isLast && (
+                    <>
+                      <span className="gm-last-ring absolute inset-0 rounded-full border-2 border-field-floodlight pointer-events-none" />
+                      <span className="gm-last-dot absolute inset-0 m-auto w-[26%] h-[26%] rounded-full bg-field-floodlight shadow-[0_0_6px_2px_rgba(245,207,106,0.75)] pointer-events-none" />
+                    </>
+                  )}
                 </div>
               )}
               {/* 禁手點的 ✕：用兩根旋轉的橫槓畫，會跟著格子大小縮放。
@@ -441,7 +532,7 @@ export default function Gomoku() {
             <div className="lg:hidden">
               <button onClick={() => setShowRules((p) => !p)}
                 className="w-full py-2 rounded-lg border border-field-chalk/15 bg-black/25 text-field-chalk/60 text-xs">
-                {showRules ? '▲ 收起規則' : '▼ 查看規則（先手不可下雙活三）'}
+                {showRules ? '▲ 收起規則' : '▼ 查看規則（先手三大禁手）'}
               </button>
               {showRules && <div className="mt-2"><RulePanel boardMode={v.boardMode} /></div>}
             </div>
