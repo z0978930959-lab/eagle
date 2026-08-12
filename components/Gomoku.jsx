@@ -146,6 +146,14 @@ function RulePanel({ boardMode }) {
         <div className="text-[11px] leading-relaxed text-field-chalk/60">
           白方（後手）<span className="text-field-chalk/85">三種禁手一種都沒有</span>。
         </div>
+        <div className="text-[11px] leading-relaxed text-field-chalk/60">
+          <span className="text-red-300">黑方無合法著手＝判負</span>——輪到黑方時若每一個空點都是禁手
+          （被逼到只能連六之類），該局直接判白方勝。
+        </div>
+        <div className="text-[11px] leading-relaxed text-field-chalk/60">
+          任何時候都可以<span className="text-field-chalk/85">要求和局</span>，雙方都同意才成立；
+          和局雙方都不加勝場。
+        </div>
       </div>
 
       <div className={`rounded-lg border p-2.5 ${boardMode === 'friendly' ? 'border-field-floodlight/35 bg-field-floodlight/[0.06]' : 'border-field-chalk/12'}`}>
@@ -509,7 +517,7 @@ export default function Gomoku() {
 
         <div className="text-center text-sm mb-2">
           {gameOver ? (
-            <span className="text-field-chalk/50">本場結束</span>
+            <span className="text-field-chalk/50">{v.isDraw ? '本場和局' : '本場結束'}</span>
           ) : v.myTurn ? (
             <span className="text-field-floodlight">輪到你落子</span>
           ) : (
@@ -551,8 +559,42 @@ export default function Gomoku() {
             </div>
 
             {!gameOver && (
-              <button onClick={() => act('gm_resign')} disabled={busy}
-                className="w-full py-2 rounded-lg border border-red-400/35 text-red-300/70 text-xs">認輸</button>
+              <div className="space-y-2">
+                {/* 對方提了和局，等我回應 */}
+                {v.drawOffer?.forMe && (
+                  <div className="rounded-lg border-2 border-field-floodlight/50 bg-field-floodlight/[0.08] p-2.5 text-center"
+                    style={{ animation: 'memePop 400ms cubic-bezier(.34,1.56,.64,1) both' }}>
+                    <div className="text-[12px] font-bold text-field-floodlight mb-2">🤝 對手提出和局</div>
+                    <div className="flex gap-2">
+                      <button onClick={() => act('gm_draw_answer', { accept: true })} disabled={busy}
+                        className="flex-1 py-2 rounded-lg border border-field-floodlight/60 text-field-floodlight text-xs">
+                        同意和局
+                      </button>
+                      <button onClick={() => act('gm_draw_answer', { accept: false })} disabled={busy}
+                        className="flex-1 py-2 rounded-lg border border-field-chalk/25 text-field-chalk/60 text-xs">
+                        繼續下
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 我提了，等對方回應 */}
+                {v.drawOffer?.mine && (
+                  <div className="rounded-lg border border-field-chalk/20 bg-black/25 p-2 text-center text-[11px] text-field-chalk/50">
+                    🤝 已送出和局要求，等待對手回應…
+                  </div>
+                )}
+
+                {!v.drawOffer && (
+                  <button onClick={() => act('gm_draw_offer')} disabled={busy}
+                    className="w-full py-2 rounded-lg border border-field-floodlight/40 text-field-floodlight/80 text-xs">
+                    🤝 要求和局（投降輸一半）
+                  </button>
+                )}
+
+                <button onClick={() => act('gm_resign')} disabled={busy}
+                  className="w-full py-2 rounded-lg border border-red-400/35 text-red-300/70 text-xs">認輸</button>
+              </div>
             )}
 
             {/* 戰報 */}
@@ -590,9 +632,15 @@ export default function Gomoku() {
       {gameOver && !seriesOver && showGameOver && (
         <div className="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-6">
           <div className="w-full max-w-sm rounded-2xl border border-field-chalk/20 bg-[#170f08] p-7 text-center">
-            <div className="font-display text-2xl font-black mb-2" style={{ color: v.iWon ? '#f5cf6a' : '#e88' }}>
-              {v.winner ? (v.iWon ? '你贏了這場' : '對手贏了這場') : '這場和局'}
+            <div className="font-display text-2xl font-black mb-2"
+              style={{ color: v.isDraw ? '#f2ead9' : v.iWon ? '#f5cf6a' : '#e88' }}>
+              {v.isDraw ? '🤝 這場和局' : v.iWon ? '你贏了這場' : '對手贏了這場'}
             </div>
+            {v.stuck && (
+              <div className="text-[11px] text-red-300/80 mb-2">
+                黑方每一個空點都是禁手，無合法著手可下
+              </div>
+            )}
             <div className="text-xs text-field-chalk/50 mb-5">系列比分 {v.series.wins[v.role]} : {v.series.wins[v.role === 'a' ? 'b' : 'a']}</div>
             <button onClick={() => act('gm_next')} disabled={busy}
               className="w-full py-2.5 rounded-xl border border-field-floodlight/60 text-field-floodlight text-sm tracking-widest disabled:opacity-40">
