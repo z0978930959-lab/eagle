@@ -32,26 +32,32 @@ const ROLE_COLOR = {
   bomb: { solid: '#c9484f', soft: 'rgba(201,72,79,0.20)', label: '炸彈' },
 };
 const roleImg = (role, n) => `/mission/${role === 'key' ? 'key' : role === 'civ' ? 'civilian' : 'bomb'}_${n}.png`;
-const MS_STICKERS = [['taunt_1', '柴犬'], ['taunt_2', '哈士奇'], ['taunt_3', '你這隻豬'], ['taunt_4', '要那個幹什麼']];
+const MS_STICKERS = [
+  ['taunt_1', '柴犬'], ['taunt_2', '哈士奇'], ['taunt_3', '你這隻豬'], ['taunt_4', '要那個幹什麼'],
+  ['taunt_5', '做得好'], ['taunt_6', '兄弟你懂我'], ['taunt_7', '哦是嗎'], ['taunt_8', '你認真的？'],
+];
 
 /* ---------------- 格子 ---------------- */
 
-function Cell({ cell, canGuess, onGuess, justRevealed, showAnswer }) {
+function Cell({ cell, canGuess, onGuess, justRevealed, showAnswer, revealAll }) {
   const revealed = cell.revealed;
-  const answer = cell.answer; // 引導者未翻時可見的答案
+  const answer = cell.answer; // 引導者未翻時可見的答案（終局時雙方都拿得到）
   const shown = cell.role; // 翻開後的真身分
-  const soft = !revealed && showAnswer && answer ? ROLE_COLOR[answer].soft : 'transparent';
+  // 終局攤牌：沒被翻到的格子也把圖翻出來，但用暗一階的樣式標成「未翻開」，
+  // 一眼就分得出「這局實際翻到的」和「藏著沒被找到的」。
+  const openFace = revealed || (revealAll && !!shown);
+  const soft = !openFace && showAnswer && answer ? ROLE_COLOR[answer].soft : 'transparent';
 
   return (
     <button
       onClick={() => canGuess && !revealed && onGuess(cell._idx)}
       disabled={!canGuess || revealed}
       className={`relative rounded-lg aspect-[5/7] w-full overflow-hidden transition-transform border
-        ${revealed ? 'border-transparent' : 'border-field-chalk/15'}
+        ${openFace ? 'border-transparent' : 'border-field-chalk/15'}
         ${canGuess && !revealed ? 'hover:-translate-y-0.5 hover:border-field-floodlight cursor-pointer' : 'cursor-default'}`}
-      style={{ background: revealed ? '#0d1016' : soft }}
+      style={{ background: openFace ? '#0d1016' : soft }}
     >
-      {!revealed && (
+      {!openFace && (
         <span className="absolute inset-0 flex flex-col items-center justify-center p-1">
           <span className="font-display font-bold text-center leading-tight text-field-chalk" style={{ fontSize: cell.word.length > 2 ? '0.82rem' : '1.05rem' }}>
             {cell.word}
@@ -61,14 +67,32 @@ function Cell({ cell, canGuess, onGuess, justRevealed, showAnswer }) {
           )}
         </span>
       )}
-      {revealed && (
-        <span className="absolute inset-0" style={{ animation: justRevealed ? 'msFlip 620ms cubic-bezier(.6,.02,.9,.6) both' : 'none' }}>
-          <img src={roleImg(shown, cell.img)} alt="" className="absolute inset-0 w-full h-full object-cover" />
+      {openFace && (
+        <span
+          className="absolute inset-0"
+          style={{
+            animation: justRevealed
+              ? 'msFlip 620ms cubic-bezier(.6,.02,.9,.6) both'
+              : !revealed
+                ? 'msFlip 620ms cubic-bezier(.6,.02,.9,.6) both'
+                : 'none',
+            opacity: revealed ? 1 : 0.62,
+          }}
+        >
+          <img src={roleImg(shown, cell.img)} alt="" className="absolute inset-0 w-full h-full object-cover"
+            style={{ filter: revealed ? 'none' : 'grayscale(0.55)' }} />
           <span className="absolute inset-0" style={{ background: ROLE_COLOR[shown].soft, mixBlendMode: 'multiply' }} />
-          <span className="absolute inset-0 rounded-lg" style={{ boxShadow: `inset 0 0 0 2px ${ROLE_COLOR[shown].solid}` }} />
-          <span className="absolute top-0 left-0 right-0 py-0.5 text-center text-[9px] font-bold text-white" style={{ background: ROLE_COLOR[shown].solid }}>
+          <span className="absolute inset-0 rounded-lg"
+            style={{ boxShadow: `inset 0 0 0 2px ${ROLE_COLOR[shown].solid}`, opacity: revealed ? 1 : 0.55 }} />
+          <span className="absolute top-0 left-0 right-0 py-0.5 text-center text-[9px] font-bold text-white"
+            style={{ background: ROLE_COLOR[shown].solid }}>
             {ROLE_COLOR[shown].label}
           </span>
+          {!revealed && (
+            <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[9px] font-bold text-white bg-black/70 whitespace-nowrap">
+              未翻開
+            </span>
+          )}
           <span className="absolute bottom-0 left-0 right-0 py-0.5 text-center text-[11px] font-display font-bold text-white bg-black/55">{cell.word}</span>
         </span>
       )}
@@ -158,7 +182,7 @@ export default function Mission() {
   const [lobbyErr, setLobbyErr] = useState('');
   const [flipIdx, setFlipIdx] = useState(null);
   const [stickers, setStickers] = useState({ a: null, b: null }); // 雙方各自獨立顯示
-  const [showFail, setShowFail] = useState(false);
+  const [showResult, setShowResult] = useState(false); // 終局結算：踩炸彈時延後 1.2 秒，讓翻牌動畫先跑完
   const pollRef = useRef(null);
   const lastRevealSeq = useRef(0);
   const stickerSeqRef = useRef({ a: 0, b: 0 });
@@ -190,13 +214,14 @@ export default function Mission() {
     }
   }, [view?.lastReveal?.seq]);
 
-  // 踩炸彈：先翻出結果（約 1.2 秒）再跳失敗畫面
+  // 終局：勝利／逾時立刻結算；踩炸彈先讓那張牌翻出來（約 1.2 秒）再結算＋攤牌
   useEffect(() => {
-    if (view?.phase === 'over' && view.result === 'bomb') {
-      const t = setTimeout(() => setShowFail(true), 1200);
+    if (view?.phase !== 'over') { setShowResult(false); return; }
+    if (view.result === 'bomb') {
+      const t = setTimeout(() => setShowResult(true), 1200);
       return () => clearTimeout(t);
     }
-    if (view?.phase !== 'over') setShowFail(false);
+    setShowResult(true);
   }, [view?.phase, view?.result]);
 
   // 貼圖：雙方各自獨立顯示 2 秒，可同時出現、也可以連發（連發會重新計時）。
@@ -282,6 +307,8 @@ export default function Mission() {
 
   const cells = v.cells.map((c, i) => ({ ...c, _idx: i }));
   const isOver = v.phase === 'over';
+  // 終局攤牌：伺服器已把所有格子的身分送給雙方，等結算時機到了就整盤打開
+  const revealAll = isOver && showResult && !!v.finalReveal;
   const isGuide = v.myRole === 'guide';
   const canGuess = v.myTurnToGuess && !isOver;
 
@@ -322,10 +349,51 @@ export default function Mission() {
           </div>
         </div>
 
+        {/* 結算（v36：改成跟盤面排在一起的區塊，不再用全螢幕彈窗蓋住攤牌結果） */}
+        {isOver && showResult && (
+          <div
+            className={`rounded-2xl border p-4 mb-4 text-center ${
+              v.result === 'win' ? 'border-[#3f9b68]/50 bg-[#3f9b68]/[0.10]'
+                : v.result === 'bomb' ? 'border-red-500/45 bg-red-500/[0.08]'
+                  : 'border-field-chalk/25 bg-black/30'}`}
+            style={{ animation: 'memePop 500ms cubic-bezier(.34,1.56,.64,1) both' }}
+          >
+            {v.result === 'bomb' && (
+              <img src="/mission/fail.png" alt="失敗" className="w-full max-w-[220px] mx-auto rounded-xl border-2 border-red-500/40 shadow-2xl mb-3" />
+            )}
+            <div className="text-4xl mb-1">{v.result === 'win' ? '🎉' : v.result === 'bomb' ? '💥' : '⏳'}</div>
+            <div className="font-display text-2xl font-black mb-1"
+              style={{ color: v.result === 'win' ? '#5fcf8f' : v.result === 'bomb' ? '#f0949a' : '#e8b88a' }}>
+              {v.result === 'win' ? '挑戰成功！' : v.result === 'bomb' ? '踩到炸彈了…' : '回合用完了'}
+            </div>
+            <div className="text-xs text-field-chalk/55">
+              找到 {v.found}/{v.keyTotal} 個關鍵人物　·　用掉 {v.roundsUsed}/{v.roundsTotal} 回合
+            </div>
+            <div className="text-[11px] text-field-chalk/40 mt-1">
+              下方盤面已全部攤開，暗色＝這局沒被翻到的牌（雙方都看得到）
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-3 mt-3 text-[11px]">
+              {[['key', '關鍵人物'], ['civ', '路人'], ['bomb', '炸彈']].map(([r, label]) => (
+                <span key={r} className="flex items-center gap-1 text-field-chalk/60">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: ROLE_COLOR[r].solid }} />
+                  {label}
+                </span>
+              ))}
+            </div>
+            {/* 舊版這裡是 location.reload()，但 sessionStorage 還留著同一間「已結束」的房，
+                重新整理後又回到同一張結算畫面。改成真的退回大廳重開一局。 */}
+            <div className="flex gap-3 justify-center mt-4">
+              <button onClick={leave}
+                className="px-6 py-2 rounded-xl border border-field-floodlight/60 text-field-floodlight text-sm tracking-widest">回大廳・再開一局</button>
+            </div>
+            <div className="text-[10px] text-field-chalk/30 mt-2">想再看一下盤面就先別按，往下滑即可</div>
+          </div>
+        )}
+
         {/* 盤面 */}
         <div className="grid grid-cols-5 gap-2 mb-4">
           {cells.map((c) => (
-            <Cell key={c._idx} cell={c} canGuess={canGuess} onGuess={(i) => act('ms_guess', { index: i })} justRevealed={flipIdx === c._idx} showAnswer={isGuide} />
+            <Cell key={c._idx} cell={c} canGuess={canGuess} onGuess={(i) => act('ms_guess', { index: i })} justRevealed={flipIdx === c._idx} showAnswer={isGuide} revealAll={revealAll} />
           ))}
         </div>
 
@@ -371,8 +439,8 @@ export default function Mission() {
 
         {/* 貼圖 */}
         <div className="mb-4">
-          <div className="text-[10px] text-field-chalk/35 mb-1 text-center">貼圖（2 秒內不能連點）</div>
-          <div className="flex justify-center gap-2">
+          <div className="text-[10px] text-field-chalk/35 mb-1 text-center">貼圖</div>
+          <div className="flex flex-wrap justify-center gap-2">
             {MS_STICKERS.map(([key, label]) => (
               <button key={key} onClick={() => act('ms_sticker', { name: key })}
                 className="w-11 h-11 rounded-lg border border-field-chalk/15 bg-black/30 hover:border-field-floodlight overflow-hidden" title={label}>
@@ -409,34 +477,6 @@ export default function Mission() {
           </div>
         );
       })}
-
-      {/* 勝利／逾時終局 */}
-      {isOver && v.result !== 'bomb' && (
-        <div className="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-6">
-          <div className="w-full max-w-sm rounded-2xl border border-field-chalk/20 bg-[#12161e] p-7 text-center">
-            <div className="text-5xl mb-3">{v.result === 'win' ? '🎉' : '⏳'}</div>
-            <div className="font-display text-2xl font-black mb-2" style={{ color: v.result === 'win' ? '#5fcf8f' : '#e88' }}>
-              {v.result === 'win' ? '挑戰成功！' : '回合用完了'}
-            </div>
-            <div className="text-xs text-field-chalk/50 mb-5">找到 {v.found}/{v.keyTotal} 個關鍵人物</div>
-            <button onClick={() => location.reload()} className="w-full py-2.5 rounded-xl border border-field-floodlight/60 text-field-floodlight text-sm tracking-widest">再玩一局</button>
-            <button onClick={leave} className="mt-3 text-field-chalk/40 text-xs underline underline-offset-4">離開</button>
-          </div>
-        </div>
-      )}
-
-      {/* 踩炸彈失敗畫面（花臉貓）*/}
-      {isOver && v.result === 'bomb' && showFail && (
-        <div className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-6" style={{ animation: 'overlayIn 0.4s ease-out both' }}>
-          <div className="w-full max-w-md text-center" style={{ animation: 'memePop 500ms cubic-bezier(.34,1.56,.64,1) both' }}>
-            <img src="/mission/fail.png" alt="失敗" className="w-full rounded-2xl border-2 border-red-500/40 shadow-2xl mb-4" />
-            <div className="font-display text-3xl font-black text-red-300 mb-2">踩到炸彈了…</div>
-            <div className="text-xs text-field-chalk/50 mb-5">找到 {v.found}/{v.keyTotal} 個關鍵人物</div>
-            <button onClick={() => location.reload()} className="w-full py-2.5 rounded-xl border border-field-floodlight/60 text-field-floodlight text-sm tracking-widest">再玩一局</button>
-            <button onClick={leave} className="mt-3 text-field-chalk/40 text-xs underline underline-offset-4">離開</button>
-          </div>
-        </div>
-      )}
 
       <Chat code={session.code} token={session.token} chat={v.chat} role={v.chatRole} labels={labels} onView={setView} />
     </div>

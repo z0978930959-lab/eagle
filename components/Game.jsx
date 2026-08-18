@@ -998,9 +998,12 @@ function SwingTimingGame({ stuff = 50, stamina = 100, grade = 'B', actionLabel =
     return () => cancelAnimationFrame(raf);
   }, [finish]);
 
+  // [v36 修正] 計分改用「畫面上這一刻真正畫出來的位置」＝ pos state。
+  // 舊版讀 posRef.current，那是 requestAnimationFrame 剛寫進去、但 React 還沒 render 出來的
+  // 下一格位置；在畫面更新較慢的機器上，判定點會比玩家看到的光標超前一到數格，
+  // 於是「看起來停在★完美／○不錯」卻被算成更差的區域。
   const swing = () => {
-    const p = posRef.current;
-    finish(Math.max(0, Math.round(100 - Math.abs(p - 50) * 2)));
+    finish(Math.max(0, Math.round(100 - Math.abs(pos - 50) * 2)));
   };
 
   return (
