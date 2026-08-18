@@ -9,6 +9,7 @@ import Poker from './Poker';
 import Ecard from './Ecard';
 import DrawGuess from './DrawGuess';
 import Gomoku from './Gomoku';
+import OnePoker from './OnePoker';
 
 /* 遊戲入口：選擇棒球對戰、賓果對決或璀璨寶石。
  * 進入遊戲後左上角有「⌂」可回到選單（對局進度存在 sessionStorage，
@@ -58,6 +59,12 @@ const MODES = [
     desc: '15×15 黑白對弈——先手黑棋有三三／四四／長連三種禁手，另有友善提示模式',
   },
   {
+    key: 'onepoker',
+    icon: '♠️',
+    title: '單張撲克',
+    desc: '一張定勝負——只公開 Up／Down，下注唬人，20 回合搶光對手籌碼（2 吃 A）',
+  },
+  {
     key: 'drawguess',
     icon: '🎨',
     title: '你畫我猜',
@@ -78,6 +85,7 @@ export default function Home() {
       ecard: <Ecard />,
       gomoku: <Gomoku />,
       drawguess: <DrawGuess />,
+      onepoker: <OnePoker />,
     }[mode];
     return (
       <div className="relative">

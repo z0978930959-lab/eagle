@@ -128,6 +128,15 @@ body {
   @keyframes msFlip { 0%,100% { transform: none; filter: none; } }
 }
 
+/* 密語連線：終局結算面板（就地展開，不蓋住盤面） */
+@keyframes msResultIn {
+  0%   { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  100% { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes msResultIn { 0%,100% { opacity: 1; transform: none; } }
+}
+
 /* 17 撲克 / E 卡：翻牌慢後快 */
 @keyframes pkFlip {
   0%{transform:rotateY(0deg);filter:brightness(1);}
